@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
@@ -22,6 +23,15 @@ func NewChapterRepository(db *sqlx.DB) chapter.Repository {
 
 // Create new chapter
 func (r *chapterRepo) CreateChapter(ctx context.Context, chapter *models.Chapter) (*models.Chapter, error) {
+	// First verify the user exists
+	var exists bool
+	if err := r.db.GetContext(ctx, &exists, "SELECT EXISTS(SELECT 1 FROM users WHERE user_id = $1)", chapter.CreatedBy); err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, fmt.Errorf("user with ID %s does not exist", chapter.CreatedBy)
+	}
+
 	c := &models.Chapter{}
 	if err := r.db.QueryRowxContext(
 		ctx,
@@ -78,17 +88,42 @@ func (r *chapterRepo) DeleteChapter(ctx context.Context, chapterID uuid.UUID) er
 	return err
 }
 
+// Create lesson
+func (r *chapterRepo) CreateLesson(ctx context.Context, lesson *models.Lesson) error {
+	return r.db.QueryRowxContext(
+		ctx,
+		createLessonQuery,
+		lesson.ChapterID,
+		lesson.Title,
+		lesson.Description,
+		lesson.Content,
+		lesson.Grade,
+		lesson.Subject,
+		lesson.Order,
+		lesson.IsCustom,
+		lesson.CreatedBy,
+	).Scan(&lesson.LessonID)
+}
+
+// Get lessons by chapter
+func (r *chapterRepo) GetLessonsByChapter(ctx context.Context, chapterID uuid.UUID) ([]*models.Lesson, error) {
+	var lessons []*models.Lesson
+	if err := r.db.SelectContext(ctx, &lessons, getLessonsByChapterQuery, chapterID); err != nil {
+		return nil, err
+	}
+	return lessons, nil
+}
+
 // Create lesson media
 func (r *chapterRepo) CreateLessonMedia(ctx context.Context, media *models.LessonMedia) error {
-	_, err := r.db.ExecContext(
+	return r.db.QueryRowxContext(
 		ctx,
 		createLessonMediaQuery,
 		media.LessonID,
 		media.MediaType,
 		media.URL,
 		media.Description,
-	)
-	return err
+	).Scan(&media.MediaID)
 }
 
 // Get lesson media by chapter
@@ -102,15 +137,14 @@ func (r *chapterRepo) GetLessonMediaByChapter(ctx context.Context, chapterID uui
 
 // Create quiz
 func (r *chapterRepo) CreateQuiz(ctx context.Context, quiz *models.Quiz) error {
-	_, err := r.db.ExecContext(
+	return r.db.QueryRowxContext(
 		ctx,
 		createQuizQuery,
 		quiz.LessonID,
 		quiz.Title,
 		quiz.Description,
 		quiz.TimeLimit,
-	)
-	return err
+	).StructScan(quiz)
 }
 
 // Get quiz by chapter
@@ -124,7 +158,7 @@ func (r *chapterRepo) GetQuizByChapter(ctx context.Context, chapterID uuid.UUID)
 
 // Create question
 func (r *chapterRepo) CreateQuestion(ctx context.Context, question *models.Question) error {
-	_, err := r.db.ExecContext(
+	return r.db.QueryRowxContext(
 		ctx,
 		createQuestionQuery,
 		question.QuizID,
@@ -135,8 +169,7 @@ func (r *chapterRepo) CreateQuestion(ctx context.Context, question *models.Quest
 		question.Explanation,
 		question.Points,
 		question.Difficulty,
-	)
-	return err
+	).StructScan(question)
 }
 
 // Get user custom chapters

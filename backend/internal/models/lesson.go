@@ -15,6 +15,7 @@ type Lesson struct {
 	Content     string    `json:"content" db:"content" validate:"required"`
 	Grade       int       `json:"grade" db:"grade" validate:"required,gte=1,lte=12"`
 	Subject     string    `json:"subject" db:"subject" validate:"required,lte=50"`
+	Order       int       `json:"order" db:"order" validate:"required"`
 	IsCustom    bool      `json:"is_custom" db:"is_custom"`
 	CreatedBy   uuid.UUID `json:"created_by" db:"created_by" validate:"required"`
 	CreatedAt   time.Time `json:"created_at" db:"created_at"`
@@ -43,6 +44,7 @@ type Chapter struct {
 	CreatedBy   uuid.UUID `json:"created_by" db:"created_by" validate:"required"`
 	CreatedAt   time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`
+	Lessons     []*Lesson `json:"lessons,omitempty" db:"-"`
 }
 
 // LessonList represents a paginated list of lessons

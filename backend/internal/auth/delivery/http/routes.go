@@ -15,7 +15,7 @@ func MapAuthRoutes(authGroup *echo.Group, h auth.Handlers, mw *middleware.Middle
 
 	// Protected routes
 	profile := authGroup.Group("/profile")
-	profile.Use(mw.AuthSessionMiddleware)
+	profile.Use(mw.AuthJWTMiddleware(mw.GetAuthUseCase(), mw.GetConfig()))
 	{
 		profile.PUT("/:id", h.UpdateProfile(), mw.CSRF)
 		profile.GET("/:id", h.GetProfile())

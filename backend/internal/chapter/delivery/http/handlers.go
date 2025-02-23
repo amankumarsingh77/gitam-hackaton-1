@@ -36,10 +36,13 @@ func NewChapterHandlers(cfg *config.Config, chapterUC chapter.UseCase, logger lo
 // @Router /chapters [post]
 func (h *chapterHandlers) CreateChapter() echo.HandlerFunc {
 	return func(c echo.Context) error {
+		user := c.Get("user").(*models.User)
 		chapter := &models.Chapter{}
 		if err := c.Bind(chapter); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
+
+		chapter.CreatedBy = user.UserID
 
 		createdChapter, err := h.chapterUC.CreateChapter(c.Request().Context(), chapter)
 		if err != nil {
@@ -181,28 +184,25 @@ func (h *chapterHandlers) DeleteChapter() echo.HandlerFunc {
 func (h *chapterHandlers) GenerateChapterWithAI() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		var input struct {
-			Prompt string `json:"prompt"`
+			Prompt  string `json:"prompt"`
+			Subject string `json:"subject"`
+			Grade   int    `json:"grade"`
 		}
 		if err := c.Bind(&input); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 
-		subject := c.QueryParam("subject")
-		if subject == "" {
+		if input.Subject == "" {
 			return echo.NewHTTPError(http.StatusBadRequest, "Subject is required")
 		}
 
-		gradeStr := c.QueryParam("grade")
-		if gradeStr == "" {
+		if input.Grade == 0 {
 			return echo.NewHTTPError(http.StatusBadRequest, "Grade is required")
 		}
 
-		grade, err := strconv.Atoi(gradeStr)
-		if err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "Invalid grade format")
-		}
+		user := c.Get("user").(*models.User)
 
-		chapter, err := h.chapterUC.GenerateChapterWithAI(c.Request().Context(), input.Prompt, subject, grade)
+		chapter, err := h.chapterUC.GenerateChapterWithAI(c.Request().Context(), input.Prompt, input.Subject, input.Grade, user.UserID)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}

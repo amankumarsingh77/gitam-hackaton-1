@@ -1,0 +1,2 @@
+ALTER TABLE lessons
+ALTER COLUMN description TYPE TEXT; 
