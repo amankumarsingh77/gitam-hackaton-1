@@ -1,0 +1,326 @@
+package http
+
+import (
+	"net/http"
+	"strconv"
+
+	"github.com/google/uuid"
+	"github.com/labstack/echo/v4"
+
+	"github.com/AleksK1NG/api-mc/config"
+	"github.com/AleksK1NG/api-mc/internal/chapter"
+	"github.com/AleksK1NG/api-mc/internal/models"
+	"github.com/AleksK1NG/api-mc/pkg/logger"
+)
+
+// Chapter handlers
+type chapterHandlers struct {
+	cfg       *config.Config
+	chapterUC chapter.UseCase
+	logger    logger.Logger
+}
+
+// Chapter Handlers constructor
+func NewChapterHandlers(cfg *config.Config, chapterUC chapter.UseCase, logger logger.Logger) chapter.Handlers {
+	return &chapterHandlers{cfg: cfg, chapterUC: chapterUC, logger: logger}
+}
+
+// CreateChapter godoc
+// @Summary Create new chapter
+// @Description Create a new chapter in the system
+// @Tags Chapters
+// @Accept json
+// @Produce json
+// @Param chapter body models.Chapter true "Create chapter"
+// @Success 201 {object} models.Chapter
+// @Router /chapters [post]
+func (h *chapterHandlers) CreateChapter() echo.HandlerFunc {
+	return func(c echo.Context) error {
+		chapter := &models.Chapter{}
+		if err := c.Bind(chapter); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+
+		createdChapter, err := h.chapterUC.CreateChapter(c.Request().Context(), chapter)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+
+		return c.JSON(http.StatusCreated, createdChapter)
+	}
+}
+
+// GetChapterByID godoc
+// @Summary Get chapter by ID
+// @Description Get chapter details by ID
+// @Tags Chapters
+// @Accept json
+// @Produce json
+// @Param id path string true "Chapter ID"
+// @Success 200 {object} models.Chapter
+// @Router /chapters/{id} [get]
+func (h *chapterHandlers) GetChapterByID() echo.HandlerFunc {
+	return func(c echo.Context) error {
+		chapterID, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "Invalid chapter ID")
+		}
+
+		chapter, err := h.chapterUC.GetChapterByID(c.Request().Context(), chapterID)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusNotFound, "Chapter not found")
+		}
+
+		return c.JSON(http.StatusOK, chapter)
+	}
+}
+
+// GetChaptersBySubject godoc
+// @Summary Get chapters by subject
+// @Description Get all chapters for a subject and grade
+// @Tags Chapters
+// @Accept json
+// @Produce json
+// @Param subject query string true "Subject"
+// @Param grade query int true "Grade"
+// @Success 200 {array} models.Chapter
+// @Router /chapters [get]
+func (h *chapterHandlers) GetChaptersBySubject() echo.HandlerFunc {
+	return func(c echo.Context) error {
+		subject := c.QueryParam("subject")
+		if subject == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "Subject is required")
+		}
+
+		gradeStr := c.QueryParam("grade")
+		if gradeStr == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "Grade is required")
+		}
+
+		grade, err := strconv.Atoi(gradeStr)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "Invalid grade format")
+		}
+
+		chapters, err := h.chapterUC.GetChaptersBySubject(c.Request().Context(), subject, grade)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+
+		return c.JSON(http.StatusOK, chapters)
+	}
+}
+
+// UpdateChapter godoc
+// @Summary Update chapter
+// @Description Update chapter details
+// @Tags Chapters
+// @Accept json
+// @Produce json
+// @Param id path string true "Chapter ID"
+// @Param chapter body models.Chapter true "Update chapter"
+// @Success 200 {object} models.Chapter
+// @Router /chapters/{id} [put]
+func (h *chapterHandlers) UpdateChapter() echo.HandlerFunc {
+	return func(c echo.Context) error {
+		chapterID, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "Invalid chapter ID")
+		}
+
+		chapter := &models.Chapter{}
+		if err := c.Bind(chapter); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+		chapter.ChapterID = chapterID
+
+		updatedChapter, err := h.chapterUC.UpdateChapter(c.Request().Context(), chapter)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+
+		return c.JSON(http.StatusOK, updatedChapter)
+	}
+}
+
+// DeleteChapter godoc
+// @Summary Delete chapter
+// @Description Delete a chapter by ID
+// @Tags Chapters
+// @Accept json
+// @Produce json
+// @Param id path string true "Chapter ID"
+// @Success 204 "No Content"
+// @Router /chapters/{id} [delete]
+func (h *chapterHandlers) DeleteChapter() echo.HandlerFunc {
+	return func(c echo.Context) error {
+		chapterID, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "Invalid chapter ID")
+		}
+
+		if err := h.chapterUC.DeleteChapter(c.Request().Context(), chapterID); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+
+		return c.NoContent(http.StatusNoContent)
+	}
+}
+
+// GenerateChapterWithAI godoc
+// @Summary Generate chapter using AI
+// @Description Generate a new chapter using AI with given prompt
+// @Tags AI Generation
+// @Accept json
+// @Produce json
+// @Param prompt body string true "Generation prompt"
+// @Param subject query string true "Subject"
+// @Param grade query int true "Grade"
+// @Success 201 {object} models.Chapter
+// @Router /chapters/generate [post]
+func (h *chapterHandlers) GenerateChapterWithAI() echo.HandlerFunc {
+	return func(c echo.Context) error {
+		var input struct {
+			Prompt string `json:"prompt"`
+		}
+		if err := c.Bind(&input); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+
+		subject := c.QueryParam("subject")
+		if subject == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "Subject is required")
+		}
+
+		gradeStr := c.QueryParam("grade")
+		if gradeStr == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "Grade is required")
+		}
+
+		grade, err := strconv.Atoi(gradeStr)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "Invalid grade format")
+		}
+
+		chapter, err := h.chapterUC.GenerateChapterWithAI(c.Request().Context(), input.Prompt, subject, grade)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+
+		return c.JSON(http.StatusCreated, chapter)
+	}
+}
+
+// GenerateMemesForChapter godoc
+// @Summary Generate memes for chapter
+// @Description Generate memes for a chapter using AI
+// @Tags AI Generation
+// @Accept json
+// @Produce json
+// @Param id path string true "Chapter ID"
+// @Param topic body string true "Meme topic"
+// @Success 201 {array} models.LessonMedia
+// @Router /chapters/{id}/memes [post]
+func (h *chapterHandlers) GenerateMemesForChapter() echo.HandlerFunc {
+	return func(c echo.Context) error {
+		chapterID, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "Invalid chapter ID")
+		}
+
+		var input struct {
+			Topic string `json:"topic"`
+		}
+		if err := c.Bind(&input); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+
+		memes, err := h.chapterUC.GenerateMemesForChapter(c.Request().Context(), chapterID, input.Topic)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+
+		return c.JSON(http.StatusCreated, memes)
+	}
+}
+
+// GenerateQuizForChapter godoc
+// @Summary Generate quiz for chapter
+// @Description Generate a quiz for a chapter using AI
+// @Tags AI Generation
+// @Accept json
+// @Produce json
+// @Param id path string true "Chapter ID"
+// @Success 201 {object} models.Quiz
+// @Router /chapters/{id}/quiz [post]
+func (h *chapterHandlers) GenerateQuizForChapter() echo.HandlerFunc {
+	return func(c echo.Context) error {
+		chapterID, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "Invalid chapter ID")
+		}
+
+		quiz, err := h.chapterUC.GenerateQuizForChapter(c.Request().Context(), chapterID)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+
+		return c.JSON(http.StatusCreated, quiz)
+	}
+}
+
+// CreateCustomChapter godoc
+// @Summary Create custom chapter
+// @Description Create a custom chapter for a user
+// @Tags Custom Content
+// @Accept json
+// @Produce json
+// @Param chapter body models.Chapter true "Custom chapter"
+// @Success 201 {object} models.Chapter
+// @Router /chapters/custom [post]
+func (h *chapterHandlers) CreateCustomChapter() echo.HandlerFunc {
+	return func(c echo.Context) error {
+		chapter := &models.Chapter{}
+		if err := c.Bind(chapter); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+
+		// Get user ID from context (set by auth middleware)
+		userID, ok := c.Get("user_id").(uuid.UUID)
+		if !ok {
+			return echo.NewHTTPError(http.StatusUnauthorized, "User not authenticated")
+		}
+
+		createdChapter, err := h.chapterUC.CreateCustomChapter(c.Request().Context(), chapter, userID)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+
+		return c.JSON(http.StatusCreated, createdChapter)
+	}
+}
+
+// GetUserCustomChapters godoc
+// @Summary Get user's custom chapters
+// @Description Get all custom chapters created by a user
+// @Tags Custom Content
+// @Accept json
+// @Produce json
+// @Success 200 {array} models.Chapter
+// @Router /chapters/custom [get]
+func (h *chapterHandlers) GetUserCustomChapters() echo.HandlerFunc {
+	return func(c echo.Context) error {
+		// Get user ID from context (set by auth middleware)
+		userID, ok := c.Get("user_id").(uuid.UUID)
+		if !ok {
+			return echo.NewHTTPError(http.StatusUnauthorized, "User not authenticated")
+		}
+
+		chapters, err := h.chapterUC.GetUserCustomChapters(c.Request().Context(), userID)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+
+		return c.JSON(http.StatusOK, chapters)
+	}
+}
