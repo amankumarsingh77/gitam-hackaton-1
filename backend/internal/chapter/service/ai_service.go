@@ -389,57 +389,55 @@ func cleanJSONResponse(response string) string {
 }
 
 func (s *aiService) GenerateQuizContent(ctx context.Context, lessonContent string) (*models.Quiz, []*models.Question, error) {
+	quizPrompt := fmt.Sprintf(`You are a educational quiz creator, Create a quiz for the following lesson content: %s. 
+	Respond ONLY with a JSON object in the following format(no additional text, just the JSON):
+	"quiz": {
+		"title": "Quiz Title",
+		"description": "Quiz description",
+		"time_limit": 500
+	},
+	"questions": [
+		{
+			"text" : "Question text here",
+			"question_type": "multiple_choice",
+			"options": ["option1","option2","option3","option4"],
+			"answer": "correct answer",
+			"explanation": "explanation of the answer",
+			"points": 5
+			"difficulty":"easy",
 
-	structuredPrompt := fmt.Sprintf(`You are an educational quiz creator. Create a quiz based on this lesson content:
-%s
+		}
 
-Respond ONLY with a JSON object in the following format (no additional text, just the JSON):
-{
-    "quiz": {
-        "title": "Quiz Title",
-        "description": "Quiz Description",
-        "time_limit": 600
-    },
-    "questions": [
-        {
-            "text": "Question text here?",
-            "question_type": "multiple_choice",
-            "options": ["Option 1", "Option 2", "Option 3", "Option 4"],
-            "answer": "Option 1",
-            "explanation": "Explanation why Option 1 is correct",
-            "points": 10,
-            "difficulty": "medium"
-        }
-    ]
-}
+	]
+Notes: 
+- Create 10 questions for the quiz
+- text should be related to the lesson content
+- question_type should be multiple_choice or fill in the blanks (with options) or true/false
+- options should be related to the question
+- answer should be related to the question
+- explanation should be related to the answer
+- points should be related to the difficulty of the question(easy: 5, medium: 10 ,hard: 15)
+- time_limit should be from (300-900 seconds)
+- difficulty should be easy, medium, hard
+- generate the quiz in such a way that 5 easy questions, 3 medium questions, 2 hard questions
 
-Requirements:
-- Create exactly 10 questions
-- Mix difficulty levels (easy, medium, hard)
-- Include both multiple_choice and true_false types
-- For multiple choice, provide 4 options
-- For true/false, use ["True", "False"] as options
-- Points: easy=5, medium=10, hard=15
-- Time limit must be between 300 and 900 seconds
-- Provide clear explanations
-- No markdown, no additional text, just valid JSON`, lessonContent)
-
+	}`, lessonContent)
 	model := s.geminiClient.GenerativeModel("gemini-2.0-flash")
-	resp, err := model.GenerateContent(ctx, genai.Text(structuredPrompt))
+	model.SetTemperature(0.3)
+	model.SetTopK(20)
+	model.SetTopP(0.8)
+	model.SetMaxOutputTokens(8192)
+
+	quizResp, err := model.GenerateContent(ctx, genai.Text(quizPrompt))
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to generate quiz: %w", err)
 	}
 
-	if len(resp.Candidates) == 0 || len(resp.Candidates[0].Content.Parts) == 0 {
-		return nil, nil, fmt.Errorf("no quiz content generated")
+	if len(quizResp.Candidates) == 0 || len(quizResp.Candidates[0].Content.Parts) == 0 {
+		return nil, nil, fmt.Errorf("no quiz generated")
 	}
 
-	quizText := string(resp.Candidates[0].Content.Parts[0].(genai.Text))
-
-	quizText = strings.TrimPrefix(quizText, "```json")
-	quizText = strings.TrimPrefix(quizText, "```")
-	quizText = strings.TrimSuffix(quizText, "```")
-	quizText = strings.TrimSpace(quizText)
+	quizText := cleanJSONResponse(string(quizResp.Candidates[0].Content.Parts[0].(genai.Text)))
 
 	var result struct {
 		Quiz struct {
@@ -459,11 +457,7 @@ Requirements:
 	}
 
 	if err := json.Unmarshal([]byte(quizText), &result); err != nil {
-		return nil, nil, fmt.Errorf("failed to parse generated quiz: %w", err)
-	}
-
-	if result.Quiz.TimeLimit < 300 || result.Quiz.TimeLimit > 900 {
-		result.Quiz.TimeLimit = 600
+		return nil, nil, fmt.Errorf("failed to parse quiz: %w", err)
 	}
 
 	quiz := &models.Quiz{
@@ -474,44 +468,18 @@ Requirements:
 
 	var questions []*models.Question
 	for _, q := range result.Questions {
-
-		if q.QuestionType != "multiple_choice" && q.QuestionType != "true_false" {
-			q.QuestionType = "multiple_choice"
-		}
-
-		if q.QuestionType == "true_false" {
-			q.Options = []string{"True", "False"}
-		} else if len(q.Options) != 4 {
-			continue
-		}
-
-		points := map[string]int{
-			"easy":   5,
-			"medium": 10,
-			"hard":   15,
-		}
-		if validPoints, ok := points[q.Difficulty]; ok {
-			q.Points = validPoints
-		} else {
-			q.Points = 10
-			q.Difficulty = "medium"
-		}
-
 		question := &models.Question{
 			Text:         q.Text,
 			QuestionType: q.QuestionType,
 			Options:      q.Options,
 			Answer:       q.Answer,
 			Explanation:  q.Explanation,
-			Points:       q.Points,
-			Difficulty:   q.Difficulty,
 		}
 		questions = append(questions, question)
-	}
-	s.logger.Infof("Generated question: %s", questions)
 
-	if len(questions) == 0 {
-		return nil, nil, fmt.Errorf("no valid questions generated")
+	}
+	if len(questions)==0 {
+		return nil,nil,fmt.Errorf("No questions generated");
 	}
 
 	return quiz, questions, nil
