@@ -25,6 +25,7 @@ type aiService struct {
 	logger       logger.Logger
 }
 
+
 func NewAIService(cfg *config.Config, logger logger.Logger) (chapter.AIService, error) {
 
 	openaiConfig := openai.DefaultConfig(cfg.OpenAI.APIKey)
@@ -478,9 +479,11 @@ Notes:
 		questions = append(questions, question)
 
 	}
-	if len(questions)==0 {
-		return nil,nil,fmt.Errorf("No questions generated");
+	if len(questions) == 0 {
+		return nil, nil, fmt.Errorf("no questions generated")
 	}
+
+
 
 	return quiz, questions, nil
 }
