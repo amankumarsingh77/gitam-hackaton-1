@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -59,7 +60,6 @@ func (u *chapterUC) GenerateChapterWithAI(ctx context.Context, prompt string, su
 	}
 
 	for _, lesson := range chapter.Lessons {
-
 		lesson.ChapterID = createdChapter.ChapterID
 		lesson.CreatedBy = userID
 
@@ -69,7 +69,9 @@ func (u *chapterUC) GenerateChapterWithAI(ctx context.Context, prompt string, su
 			continue
 		}
 
+		// Generate both memes and illustrations if OpenAI API key is available
 		if u.cfg.OpenAI.APIKey != "" {
+			// Generate meme
 			memes, err := u.aiService.GenerateMemes(ctx, lesson.Title, 1)
 			if err != nil {
 				u.logger.Warnf("skipping meme generation for lesson due to error: %v", err)
@@ -79,6 +81,19 @@ func (u *chapterUC) GenerateChapterWithAI(ctx context.Context, prompt string, su
 					if err := u.chapterRepo.CreateLessonMedia(ctx, meme); err != nil {
 						u.logger.Warnf("failed to save meme: %v", err)
 					}
+				}
+			}
+
+			// Generate illustrations from prompts
+			for _, prompt := range lesson.ImagePrompts {
+				media, err := u.aiService.GenerateImageFromPrompt(ctx, prompt)
+				if err != nil {
+					u.logger.Warnf("failed to generate illustration: %v", err)
+					continue
+				}
+				media.LessonID = lesson.LessonID
+				if err := u.chapterRepo.CreateLessonMedia(ctx, media); err != nil {
+					u.logger.Warnf("failed to save illustration: %v", err)
 				}
 			}
 		}
@@ -159,4 +174,140 @@ func (u *chapterUC) CreateCustomChapter(ctx context.Context, chapter *models.Cha
 
 func (u *chapterUC) GetUserCustomChapters(ctx context.Context, userID uuid.UUID) ([]*models.Chapter, error) {
 	return u.chapterRepo.GetUserCustomChapters(ctx, userID)
+}
+
+func (u *chapterUC) GetCustomLessonsByChapter(ctx context.Context, chapterID uuid.UUID) ([]*models.Lesson, error) {
+	// First check if the chapter exists
+	chapter, err := u.chapterRepo.GetChapterByID(ctx, chapterID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get chapter: %w", err)
+	}
+
+	if chapter == nil {
+		return nil, fmt.Errorf("chapter not found")
+	}
+
+	// Get custom lessons for the chapter
+	lessons, err := u.chapterRepo.GetCustomLessonsByChapter(ctx, chapterID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get custom lessons: %w", err)
+	}
+
+	return lessons, nil
+}
+
+func (u *chapterUC) CreateCustomLesson(ctx context.Context, lesson *models.Lesson, userID uuid.UUID) (*models.Lesson, error) {
+	// Set the creator
+	lesson.CreatedBy = userID
+
+	// Ensure it's marked as custom
+	lesson.IsCustom = true
+
+	// Create the lesson
+	if err := u.chapterRepo.CreateCustomLesson(ctx, lesson); err != nil {
+		return nil, fmt.Errorf("failed to create custom lesson: %w", err)
+	}
+
+	// Return the created lesson
+	return lesson, nil
+}
+
+func (u *chapterUC) GetLessonByID(ctx context.Context, lessonID uuid.UUID) (*models.Lesson, error) {
+	lesson, err := u.chapterRepo.GetLessonByID(ctx, lessonID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get lesson: %w", err)
+	}
+
+	return lesson, nil
+}
+
+func (u *chapterUC) GetQuizByID(ctx context.Context, quizID uuid.UUID) (*models.Quiz, []*models.Question, error) {
+	// Get the quiz
+	quiz, err := u.chapterRepo.GetQuizByID(ctx, quizID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get quiz: %w", err)
+	}
+
+	// Get the questions for the quiz
+	questions, err := u.chapterRepo.GetQuestionsByQuizID(ctx, quizID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get questions for quiz: %w", err)
+	}
+
+	// For security, don't return the answers to the client
+	for _, q := range questions {
+		q.Answer = "" // Clear the answer
+	}
+
+	return quiz, questions, nil
+}
+
+func (u *chapterUC) SubmitQuizAnswers(ctx context.Context, userID uuid.UUID, quizID uuid.UUID, answers []*models.UserQuestionResponse) (*models.UserQuizAttempt, error) {
+	// Get the quiz to verify it exists
+	_, err := u.chapterRepo.GetQuizByID(ctx, quizID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get quiz: %w", err)
+	}
+
+	// Create a new quiz attempt
+	attempt := &models.UserQuizAttempt{
+		UserID:      userID,
+		QuizID:      quizID,
+		Score:       0,
+		TimeSpent:   0, // This would typically come from the client
+		CompletedAt: time.Now(),
+	}
+
+	// Get all questions for the quiz
+	questions, err := u.chapterRepo.GetQuestionsByQuizID(ctx, quizID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get questions for quiz: %w", err)
+	}
+
+	// Create a map of question IDs to questions for easy lookup
+	questionMap := make(map[string]*models.Question)
+	totalPoints := 0
+	for _, q := range questions {
+		questionMap[q.QuestionID.String()] = q
+		totalPoints += q.Points
+	}
+
+	// Calculate the score based on correct answers
+	userPoints := 0
+	for _, answer := range answers {
+		question, exists := questionMap[answer.QuestionID.String()]
+		if !exists {
+			return nil, fmt.Errorf("question with ID %s not found in quiz", answer.QuestionID)
+		}
+
+		// Check if the answer is correct
+		isCorrect := answer.UserAnswer == question.Answer
+		answer.IsCorrect = isCorrect
+
+		if isCorrect {
+			userPoints += question.Points
+		}
+	}
+
+	// Calculate the percentage score (0-100)
+	if totalPoints > 0 {
+		attempt.Score = (userPoints * 100) / totalPoints
+	}
+
+	// Save the quiz attempt
+	savedAttempt, err := u.chapterRepo.CreateQuizAttempt(ctx, attempt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to save quiz attempt: %w", err)
+	}
+
+	// Save each question response
+	for _, answer := range answers {
+		answer.AttemptID = savedAttempt.AttemptID
+		if err := u.chapterRepo.CreateQuestionResponse(ctx, answer); err != nil {
+			u.logger.Errorf("failed to save question response: %v", err)
+			// Continue with other responses even if one fails
+		}
+	}
+
+	return savedAttempt, nil
 }

@@ -1,6 +1,7 @@
 package http
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -11,6 +12,8 @@ import (
 	"github.com/AleksK1NG/api-mc/internal/chapter"
 	"github.com/AleksK1NG/api-mc/internal/models"
 	"github.com/AleksK1NG/api-mc/pkg/logger"
+	"github.com/AleksK1NG/api-mc/pkg/middleware"
+	"github.com/AleksK1NG/api-mc/pkg/response"
 )
 
 // Chapter handlers
@@ -302,25 +305,219 @@ func (h *chapterHandlers) CreateCustomChapter() echo.HandlerFunc {
 
 // GetUserCustomChapters godoc
 // @Summary Get user's custom chapters
-// @Description Get all custom chapters created by a user
-// @Tags Custom Content
+// @Description Get all custom chapters created by the authenticated user
+// @Tags Chapters
 // @Accept json
 // @Produce json
 // @Success 200 {array} models.Chapter
 // @Router /chapters/custom [get]
 func (h *chapterHandlers) GetUserCustomChapters() echo.HandlerFunc {
 	return func(c echo.Context) error {
-		// Get user ID from context (set by auth middleware)
-		userID, ok := c.Get("user_id").(uuid.UUID)
-		if !ok {
-			return echo.NewHTTPError(http.StatusUnauthorized, "User not authenticated")
-		}
+		user := c.Get("user").(*models.User)
 
-		chapters, err := h.chapterUC.GetUserCustomChapters(c.Request().Context(), userID)
+		chapters, err := h.chapterUC.GetUserCustomChapters(c.Request().Context(), user.UserID)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
 
+		// For each chapter, get the lessons to include their IDs
+		for _, chapter := range chapters {
+			lessons, err := h.chapterUC.GetCustomLessonsByChapter(c.Request().Context(), chapter.ChapterID)
+			if err != nil {
+				h.logger.Errorf("Failed to get lessons for chapter %s: %v", chapter.ChapterID, err)
+				continue
+			}
+			chapter.Lessons = lessons
+		}
+
 		return c.JSON(http.StatusOK, chapters)
+	}
+}
+
+// GetLessonByID godoc
+// @Summary Get lesson by ID
+// @Description Get lesson details by ID
+// @Tags Lessons
+// @Accept json
+// @Produce json
+// @Param id path string true "Lesson ID"
+// @Success 200 {object} models.Lesson
+// @Router /lessons/{id} [get]
+func (h *chapterHandlers) GetLessonByID() echo.HandlerFunc {
+	return func(c echo.Context) error {
+		lessonID, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "Invalid lesson ID")
+		}
+
+		lesson, err := h.chapterUC.GetLessonByID(c.Request().Context(), lessonID)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusNotFound, "Lesson not found")
+		}
+
+		return c.JSON(http.StatusOK, lesson)
+	}
+}
+
+// GetCustomLessonsByChapter godoc
+// @Summary Get custom lessons by chapter ID
+// @Description Get all custom lessons for a specific chapter
+// @Tags Chapters
+// @Accept json
+// @Produce json
+// @Param id path string true "Chapter ID"
+// @Success 200 {array} models.Lesson
+// @Router /chapters/{id}/custom-lessons [get]
+func (h *chapterHandlers) GetCustomLessonsByChapter() echo.HandlerFunc {
+	return func(c echo.Context) error {
+		chapterID, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "Invalid chapter ID")
+		}
+
+		lessons, err := h.chapterUC.GetCustomLessonsByChapter(c.Request().Context(), chapterID)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+
+		return c.JSON(http.StatusOK, lessons)
+	}
+}
+
+// CreateCustomLesson godoc
+// @Summary Create custom lesson
+// @Description Create a custom lesson for a specific chapter
+// @Tags Chapters
+// @Accept json
+// @Produce json
+// @Param id path string true "Chapter ID"
+// @Param lesson body models.Lesson true "Custom lesson"
+// @Success 201 {object} models.Lesson
+// @Router /chapters/{id}/custom-lessons [post]
+func (h *chapterHandlers) CreateCustomLesson() echo.HandlerFunc {
+	return func(c echo.Context) error {
+		chapterID, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "Invalid chapter ID")
+		}
+
+		lesson := &models.Lesson{}
+		if err := c.Bind(lesson); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+
+		// Set the chapter ID from the URL parameter
+		lesson.ChapterID = chapterID
+
+		// Get user from context
+		user := c.Get("user").(*models.User)
+
+		createdLesson, err := h.chapterUC.CreateCustomLesson(c.Request().Context(), lesson, user.UserID)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+
+		return c.JSON(http.StatusCreated, createdLesson)
+	}
+}
+
+// GetQuizByID handles the request to get a quiz by its ID
+func (h *chapterHandlers) GetQuizByID() echo.HandlerFunc {
+	return func(c echo.Context) error {
+		ctx := c.Request().Context()
+
+		// Parse quiz ID from path parameter
+		quizIDStr := c.Param("quiz_id")
+		if quizIDStr == "" {
+			return c.JSON(http.StatusBadRequest, response.Error("quiz_id is required"))
+		}
+
+		quizID, err := uuid.Parse(quizIDStr)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, response.Error("invalid quiz_id format"))
+		}
+
+		// Get the quiz and its questions
+		quiz, questions, err := h.chapterUC.GetQuizByID(ctx, quizID)
+		if err != nil {
+			h.logger.Errorf("failed to get quiz: %v", err)
+			return c.JSON(http.StatusInternalServerError, response.Error("failed to get quiz"))
+		}
+
+		// Return the quiz and questions
+		return c.JSON(http.StatusOK, response.Success(map[string]interface{}{
+			"quiz":      quiz,
+			"questions": questions,
+		}))
+	}
+}
+
+// SubmitQuizAnswers handles the request to submit answers for a quiz
+func (h *chapterHandlers) SubmitQuizAnswers() echo.HandlerFunc {
+	type QuestionAnswer struct {
+		QuestionID string `json:"question_id"`
+		Answer     string `json:"answer"`
+	}
+
+	type SubmitQuizRequest struct {
+		QuizID  string           `json:"quiz_id"`
+		Answers []QuestionAnswer `json:"answers"`
+	}
+
+	return func(c echo.Context) error {
+		ctx := c.Request().Context()
+
+		// Get user ID from context
+		userID, err := middleware.GetUserIDFromContext(c)
+		if err != nil {
+			return c.JSON(http.StatusUnauthorized, response.Error("unauthorized"))
+		}
+
+		// Parse request body
+		var req SubmitQuizRequest
+		if err := c.Bind(&req); err != nil {
+			return c.JSON(http.StatusBadRequest, response.Error("invalid request body"))
+		}
+
+		// Validate request
+		if req.QuizID == "" {
+			return c.JSON(http.StatusBadRequest, response.Error("quiz_id is required"))
+		}
+		if len(req.Answers) == 0 {
+			return c.JSON(http.StatusBadRequest, response.Error("answers are required"))
+		}
+
+		// Parse quiz ID
+		quizID, err := uuid.Parse(req.QuizID)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, response.Error("invalid quiz_id format"))
+		}
+
+		// Convert answers to model format
+		userAnswers := make([]*models.UserQuestionResponse, 0, len(req.Answers))
+		for _, ans := range req.Answers {
+			questionID, err := uuid.Parse(ans.QuestionID)
+			if err != nil {
+				return c.JSON(http.StatusBadRequest, response.Error(fmt.Sprintf("invalid question_id format: %s", ans.QuestionID)))
+			}
+
+			userAnswers = append(userAnswers, &models.UserQuestionResponse{
+				QuestionID: questionID,
+				UserAnswer: ans.Answer,
+			})
+		}
+
+		// Submit the answers
+		attempt, err := h.chapterUC.SubmitQuizAnswers(ctx, userID, quizID, userAnswers)
+		if err != nil {
+			h.logger.Errorf("failed to submit quiz answers: %v", err)
+			return c.JSON(http.StatusInternalServerError, response.Error("failed to submit quiz answers"))
+		}
+
+		// Return the result
+		return c.JSON(http.StatusOK, response.Success(map[string]interface{}{
+			"attempt": attempt,
+			"score":   attempt.Score,
+		}))
 	}
 }

@@ -9,6 +9,8 @@ import (
 	"github.com/uber/jaeger-lib/metrics"
 
 	"github.com/AleksK1NG/api-mc/config"
+	"github.com/AleksK1NG/api-mc/internal/leaderboard/repository"
+	"github.com/AleksK1NG/api-mc/internal/leaderboard/usecase"
 	"github.com/AleksK1NG/api-mc/internal/server"
 	"github.com/AleksK1NG/api-mc/pkg/db/postgres"
 	"github.com/AleksK1NG/api-mc/pkg/db/redis"
@@ -83,7 +85,17 @@ func main() {
 	defer closer.Close()
 	appLogger.Info("Opentracing connected")
 
-	s := server.NewServer(cfg, psqlDB, redisClient, appLogger)
+	// Initialize repositories
+	leaderboardRepository := repository.NewPostgresRepository(psqlDB, appLogger)
+
+	// Initialize use cases
+	leaderboardUseCase := usecase.NewLeaderboardUseCaseWithoutDeps(
+		leaderboardRepository,
+		appLogger,
+	)
+
+	// Initialize server
+	s := server.NewServer(cfg, psqlDB, redisClient, appLogger, leaderboardUseCase)
 	if err = s.Run(); err != nil {
 		log.Fatal(err)
 	}

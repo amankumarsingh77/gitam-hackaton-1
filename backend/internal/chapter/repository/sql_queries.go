@@ -40,6 +40,12 @@ const (
 		ORDER BY "order" ASC
 	`
 
+	getCustomLessonsByChapterQuery = `
+		SELECT * FROM lessons 
+		WHERE chapter_id = $1 AND is_custom = true
+		ORDER BY "order" ASC
+	`
+
 	createLessonMediaQuery = `
 		INSERT INTO lesson_media (lesson_id, media_type, url, description)
 		VALUES ($1, $2, $3, $4)
@@ -65,10 +71,40 @@ const (
 		LIMIT 1
 	`
 
+	getQuizByIDQuery = `
+		SELECT * FROM quizzes WHERE quiz_id = $1
+	`
+
 	createQuestionQuery = `
 		INSERT INTO questions (quiz_id, text, question_type, options, answer, explanation, points, difficulty)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING *
+	`
+
+	getQuestionsByQuizIDQuery = `
+		SELECT * FROM questions 
+		WHERE quiz_id = $1
+		ORDER BY created_at ASC
+	`
+
+	getQuestionByIDQuery = `
+		SELECT * FROM questions WHERE question_id = $1
+	`
+
+	createQuizAttemptQuery = `
+		INSERT INTO user_quiz_attempts (user_id, quiz_id, score, time_spent, completed_at)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING *
+	`
+
+	createQuestionResponseQuery = `
+		INSERT INTO user_question_responses (attempt_id, question_id, user_answer, is_correct)
+		VALUES ($1, $2, $3, $4)
+		RETURNING *
+	`
+
+	getLessonByIDQuery = `
+		SELECT * FROM lessons WHERE lesson_id = $1
 	`
 
 	getUserCustomChaptersQuery = `

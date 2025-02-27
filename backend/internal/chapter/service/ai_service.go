@@ -18,6 +18,17 @@ import (
 	"github.com/AleksK1NG/api-mc/pkg/logger"
 )
 
+type LessonContent struct {
+	Title              string      `json:"title"`
+	Description        string      `json:"description"`
+	Content            interface{} `json:"content"`
+	Order              int         `json:"order"`
+	Difficulty         string      `json:"difficulty"`
+	DurationMinutes    int         `json:"duration_minutes"`
+	ImagePrompts       []string    `json:"image_prompts"`
+	LearningObjectives []string    `json:"learning_objectives"`
+}
+
 type aiService struct {
 	cfg          *config.Config
 	openaiClient *openai.Client
@@ -83,7 +94,6 @@ func (s *aiService) GenerateMemes(ctx context.Context, topic string, count int) 
 		}
 		memes = append(memes, meme)
 	}
-	s.logger.Infof("Generated memes: %v", memes)
 
 	return memes, nil
 }
@@ -145,15 +155,7 @@ Notes:
 		analysis.ComplexityLevel = "intermediate"
 	}
 
-	var allLessons []struct {
-		Title              string      `json:"title"`
-		Description        string      `json:"description"`
-		Content            interface{} `json:"content"`
-		Order              int         `json:"order"`
-		Difficulty         string      `json:"difficulty"`
-		DurationMinutes    int         `json:"duration_minutes"`
-		LearningObjectives []string    `json:"learning_objectives"`
-	}
+	var allLessons []LessonContent
 
 	chapterPrompt := fmt.Sprintf(`Create a title and description for a chapter about "%s" for grade %d %s students.
 Response format:
@@ -184,6 +186,9 @@ Response format:
 		}
 
 		lessonPrompt := fmt.Sprintf(`Create %d lessons (orders %d-%d) for the chapter about "%s" for grade %d %s students.
+
+Each lesson should follow a consistent structure with clear section markers for easy frontend rendering.
+
 Response format:
 {
     "lessons": [
@@ -191,40 +196,52 @@ Response format:
             "title": "Lesson Title",
             "description": "Brief overview",
             "content": {
-                "introduction": "Hook text",
+                "introduction": "Introduction:\nEngaging hook text that introduces the topic and why it matters. This should be 2-3 paragraphs with clear explanations suitable for the grade level.",
                 "core_concepts": [
                     {
                         "title": "Concept Title",
-                        "explanation": "Clear explanation",
-                        "real_world_example": "Example",
-                        "fun_fact": "Fun fact"
+                        "explanation": "Clear explanation with examples and analogies appropriate for grade %d students. Use simple language and build on prior knowledge.",
+                        "real_world_example": "Concrete example showing how this concept applies in the real world",
+                        "fun_fact": "Interesting and memorable fact related to this concept"
+                    }
+                ],
+                "visual_elements": [
+                    {
+                        "type": "diagram",
+                        "description": "Description of what the diagram should show",
+                        "caption": "Explanatory caption for the diagram"
                     }
                 ],
                 "interactive_elements": [
                     {
                         "type": "activity",
                         "title": "Activity Title",
-                        "description": "Instructions",
-                        "materials_needed": ["item1"],
-                        "expected_outcome": "Learning outcome"
+                        "description": "Clear step-by-step instructions",
+                        "materials_needed": ["item1", "item2"],
+                        "expected_outcome": "What students will learn from this activity"
                     }
                 ],
-                "summary": "Summary text",
-                "challenge": "Challenge text"
+                "summary": "Concise summary of key points covered in the lesson, reinforcing the main concepts",
+                "challenge": "Optional extension activity or thought-provoking question to deepen understanding"
             },
             "order": %d,
             "difficulty": "basic",
             "duration_minutes": 30,
-            "learning_objectives": ["objective1", "objective2"]
+            "image_prompts": ["Generate an educational illustration showing...", "Create a visual representation of..."],
+            "learning_objectives": ["Students will be able to...", "Students will understand..."]
         }
     ]
 }
 
-Notes:
-- Make content engaging and grade-appropriate
-- Include real-world examples and fun facts
-- Each lesson should build on previous ones
-- Ensure proper order numbers (%d-%d)`, endIdx-i, i+1, endIdx, prompt, grade, subject, i+1, i+1, endIdx)
+Important formatting guidelines:
+1. Use clear section headers for different content areas (Introduction, Core Concepts, etc.)
+2. Keep paragraphs short (3-5 sentences) for better readability
+3. Include code examples with proper formatting using triple backticks where appropriate
+4. Use bullet points for lists
+5. Ensure content is engaging, accurate, and grade-appropriate
+6. Each lesson should build logically on previous ones
+7. Include clear learning objectives that are measurable
+8. Make image prompts specific enough to generate relevant educational illustrations`, endIdx-i, i+1, endIdx, prompt, grade, subject, grade, i+1)
 
 		lessonResp, err := model.GenerateContent(ctx, genai.Text(lessonPrompt))
 		if err != nil {
@@ -233,15 +250,7 @@ Notes:
 
 		lessonText := cleanJSONResponse(string(lessonResp.Candidates[0].Content.Parts[0].(genai.Text)))
 		var lessonChunk struct {
-			Lessons []struct {
-				Title              string      `json:"title"`
-				Description        string      `json:"description"`
-				Content            interface{} `json:"content"`
-				Order              int         `json:"order"`
-				Difficulty         string      `json:"difficulty"`
-				DurationMinutes    int         `json:"duration_minutes"`
-				LearningObjectives []string    `json:"learning_objectives"`
-			} `json:"lessons"`
+			Lessons []LessonContent `json:"lessons"`
 		}
 
 		if err := json.Unmarshal([]byte(lessonText), &lessonChunk); err != nil {
@@ -275,47 +284,83 @@ Notes:
 		if contentObj, ok := l.Content.(map[string]interface{}); ok {
 
 			if intro, ok := contentObj["introduction"].(string); ok {
-				content.WriteString("📚 Introduction:\n")
 				content.WriteString(intro)
 				content.WriteString("\n\n")
 			}
 
 			if concepts, ok := contentObj["core_concepts"].([]interface{}); ok {
-				content.WriteString("🎯 Core Concepts:\n\n")
+				content.WriteString("Core Concepts:\n\n")
 				for _, c := range concepts {
 					if concept, ok := c.(map[string]interface{}); ok {
-						content.WriteString(fmt.Sprintf("📍 %s\n", concept["title"]))
+						content.WriteString(fmt.Sprintf("%s\n", concept["title"]))
 						content.WriteString(fmt.Sprintf("%s\n\n", concept["explanation"]))
-						content.WriteString(fmt.Sprintf("🌟 Real-World Example: %s\n", concept["real_world_example"]))
-						content.WriteString(fmt.Sprintf("💡 Fun Fact: %s\n\n", concept["fun_fact"]))
+						content.WriteString(fmt.Sprintf("Real-World Example: %s\n", concept["real_world_example"]))
+						content.WriteString(fmt.Sprintf("Fun Fact: %s\n\n", concept["fun_fact"]))
 					}
 				}
 			}
 
+			// Visual elements section
+			if visuals, ok := contentObj["visual_elements"].([]interface{}); ok && len(visuals) > 0 {
+				content.WriteString("Visual Aids:\n")
+				for _, v := range visuals {
+					if visual, ok := v.(map[string]interface{}); ok {
+						content.WriteString(fmt.Sprintf("• %s: %s\n", visual["type"], visual["description"]))
+						if caption, ok := visual["caption"].(string); ok {
+							content.WriteString(fmt.Sprintf("  Caption: %s\n", caption))
+						}
+					}
+				}
+				content.WriteString("\n")
+			}
+
+			// Generate images for each prompt
+			if len(l.ImagePrompts) > 0 {
+				if _, ok := contentObj["visual_elements"]; !ok {
+					content.WriteString("Visual Aids:\n")
+				}
+				for _, prompt := range l.ImagePrompts {
+					content.WriteString(fmt.Sprintf("• %s\n", prompt))
+
+					// Only generate images if OpenAI API key is available
+					if s.cfg.OpenAI.APIKey != "" {
+						media, err := s.GenerateImageFromPrompt(ctx, prompt)
+						if err != nil {
+							s.logger.Warnf("Failed to generate image for prompt '%s': %v", prompt, err)
+							continue
+						}
+						// The LessonID will be set by the repository layer after the lesson is created
+						media.Description = fmt.Sprintf("Generated illustration: %s", prompt)
+					}
+				}
+				content.WriteString("\n")
+			}
+
 			if activities, ok := contentObj["interactive_elements"].([]interface{}); ok {
-				content.WriteString("🎮 Interactive Activities:\n\n")
+				content.WriteString("Interactive Activities:\n\n")
 				for _, a := range activities {
 					if activity, ok := a.(map[string]interface{}); ok {
-						content.WriteString(fmt.Sprintf("🔸 %s\n", activity["title"]))
+						content.WriteString(fmt.Sprintf("%s\n", activity["title"]))
 						content.WriteString(fmt.Sprintf("%s\n\n", activity["description"]))
-						if materials, ok := activity["materials_needed"].([]interface{}); ok {
+						if materials, ok := activity["materials_needed"].([]interface{}); ok && len(materials) > 0 {
 							content.WriteString("Materials needed:\n")
 							for _, m := range materials {
 								content.WriteString(fmt.Sprintf("- %s\n", m))
 							}
+							content.WriteString("\n")
 						}
-						content.WriteString(fmt.Sprintf("\nWhat you'll learn: %s\n\n", activity["expected_outcome"]))
+						content.WriteString(fmt.Sprintf("What you'll learn: %s\n\n", activity["expected_outcome"]))
 					}
 				}
 			}
 
 			if summary, ok := contentObj["summary"].(string); ok {
-				content.WriteString("📝 Summary:\n")
+				content.WriteString("Summary:\n")
 				content.WriteString(summary)
 				content.WriteString("\n\n")
 			}
 			if challenge, ok := contentObj["challenge"].(string); ok {
-				content.WriteString("🌟 Extra Challenge:\n")
+				content.WriteString("Extra Challenge:\n")
 				content.WriteString(challenge)
 			}
 		} else {
@@ -340,6 +385,32 @@ Notes:
 	chapter.Lessons = lessons
 
 	return chapter, nil
+}
+
+func (s *aiService) GenerateImageFromPrompt(ctx context.Context, prompt string) (*models.LessonMedia, error) {
+	req := openai.ImageRequest{
+		Prompt:         prompt,
+		Size:           openai.CreateImageSize1024x1024,
+		N:              1,
+		ResponseFormat: openai.CreateImageResponseFormatURL,
+	}
+
+	resp, err := s.openaiClient.CreateImage(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate image: %w", err)
+	}
+
+	if len(resp.Data) == 0 {
+		return nil, fmt.Errorf("no image generated")
+	}
+
+	media := &models.LessonMedia{
+		MediaType:   "image",
+		URL:         resp.Data[0].URL,
+		Description: fmt.Sprintf("Generated illustration: %s", prompt),
+	}
+
+	return media, nil
 }
 
 func cleanJSONResponse(response string) string {
@@ -508,7 +579,6 @@ Requirements:
 		}
 		questions = append(questions, question)
 	}
-	s.logger.Infof("Generated question: %s", questions)
 
 	if len(questions) == 0 {
 		return nil, nil, fmt.Errorf("no valid questions generated")

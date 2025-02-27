@@ -16,6 +16,7 @@ require (
 	github.com/jmoiron/sqlx v1.3.1
 	github.com/labstack/echo v3.3.10+incompatible
 	github.com/labstack/echo/v4 v4.13.3
+	github.com/lib/pq v1.10.2
 	github.com/microcosm-cc/bluemonday v1.0.4
 	github.com/minio/minio-go/v7 v7.0.8
 	github.com/opentracing/opentracing-go v1.2.0

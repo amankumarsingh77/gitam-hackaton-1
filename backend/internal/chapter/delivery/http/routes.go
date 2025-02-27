@@ -13,6 +13,10 @@ func MapChapterRoutes(chapterGroup *echo.Group, h chapter.Handlers, mw *middlewa
 	chapterGroup.GET("", h.GetChaptersBySubject())
 	chapterGroup.GET("/:id", h.GetChapterByID())
 
+	// Lesson routes
+	lessonGroup := chapterGroup.Group("/lessons")
+	lessonGroup.GET("/:id", h.GetLessonByID())
+
 	// Protected routes (require authentication)
 	protected := chapterGroup.Group("")
 	protected.Use(mw.AuthJWTMiddleware(mw.GetAuthUseCase(), mw.GetConfig()))
@@ -30,5 +34,11 @@ func MapChapterRoutes(chapterGroup *echo.Group, h chapter.Handlers, mw *middlewa
 		// Custom content
 		protected.POST("/custom", h.CreateCustomChapter())
 		protected.GET("/custom", h.GetUserCustomChapters())
+		protected.GET("/:id/custom-lessons", h.GetCustomLessonsByChapter())
+		protected.POST("/:id/custom-lessons", h.CreateCustomLesson())
+
+		// Quiz management
+		protected.GET("/quizzes/:quiz_id", h.GetQuizByID())
+		protected.POST("/quizzes/submit", h.SubmitQuizAnswers())
 	}
 }

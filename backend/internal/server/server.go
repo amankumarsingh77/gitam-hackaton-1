@@ -12,9 +12,13 @@ import (
 	"github.com/go-redis/redis/v8"
 	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
 
 	"github.com/AleksK1NG/api-mc/config"
 	_ "github.com/AleksK1NG/api-mc/docs"
+	"github.com/AleksK1NG/api-mc/internal/leaderboard"
+	leaderboardHttp "github.com/AleksK1NG/api-mc/internal/leaderboard/delivery/http"
+	"github.com/AleksK1NG/api-mc/internal/leaderboard/worker"
 	"github.com/AleksK1NG/api-mc/pkg/logger"
 )
 
@@ -27,16 +31,45 @@ const (
 
 // Server struct
 type Server struct {
-	echo        *echo.Echo
-	cfg         *config.Config
-	db          *sqlx.DB
-	redisClient *redis.Client
-	logger      logger.Logger
+	echo                *echo.Echo
+	cfg                 *config.Config
+	db                  *sqlx.DB
+	redisClient         *redis.Client
+	logger              logger.Logger
+	leaderboardWorker   *worker.LeaderboardWorker
+	leaderboardUC       leaderboard.UseCase
+	leaderboardHandlers leaderboard.Handlers
 }
 
 // NewServer New Server constructor
-func NewServer(cfg *config.Config, db *sqlx.DB, redisClient *redis.Client, logger logger.Logger) *Server {
-	return &Server{echo: echo.New(), cfg: cfg, db: db, redisClient: redisClient, logger: logger}
+func NewServer(cfg *config.Config, db *sqlx.DB, redisClient *redis.Client, logger logger.Logger, leaderboardUC leaderboard.UseCase) *Server {
+	e := echo.New()
+
+	// Configure CORS middleware
+	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
+		AllowOrigins: []string{"*"},
+		AllowMethods: []string{http.MethodGet, http.MethodPut, http.MethodPost, http.MethodDelete, http.MethodOptions, http.MethodPatch},
+		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
+	}))
+
+	// Initialize leaderboard worker if leaderboardUC is provided
+	var leaderboardWorker *worker.LeaderboardWorker
+	var leaderboardHandlers leaderboard.Handlers
+	if leaderboardUC != nil {
+		leaderboardWorker = worker.NewLeaderboardWorker(leaderboardUC, logger)
+		leaderboardHandlers = leaderboardHttp.NewLeaderboardHandlers(leaderboardUC, logger)
+	}
+
+	return &Server{
+		echo:                e,
+		cfg:                 cfg,
+		db:                  db,
+		redisClient:         redisClient,
+		logger:              logger,
+		leaderboardWorker:   leaderboardWorker,
+		leaderboardUC:       leaderboardUC,
+		leaderboardHandlers: leaderboardHandlers,
+	}
 }
 
 func (s *Server) Run() error {
@@ -65,6 +98,12 @@ func (s *Server) Run() error {
 			}
 		}()
 
+		// Initialize and start the leaderboard worker
+		if s.leaderboardWorker != nil {
+			s.leaderboardWorker.Start()
+			defer s.leaderboardWorker.Stop()
+		}
+
 		quit := make(chan os.Signal, 1)
 		signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 
@@ -77,29 +116,17 @@ func (s *Server) Run() error {
 		return s.echo.Server.Shutdown(ctx)
 	}
 
-	server := &http.Server{
-		Addr:           s.cfg.Server.Port,
-		ReadTimeout:    time.Second * s.cfg.Server.ReadTimeout,
-		WriteTimeout:   time.Second * s.cfg.Server.WriteTimeout,
-		MaxHeaderBytes: maxHeaderBytes,
-	}
-
 	go func() {
 		s.logger.Infof("Server is listening on PORT: %s", s.cfg.Server.Port)
-		if err := s.echo.StartServer(server); err != nil {
-			s.logger.Fatalf("Error starting Server: ", err)
+		if err := s.echo.Start(s.cfg.Server.Port); err != nil {
+			s.logger.Errorf("Error starting Server: %s", err)
 		}
 	}()
 
-	go func() {
-		s.logger.Infof("Starting Debug Server on PORT: %s", s.cfg.Server.PprofPort)
-		if err := http.ListenAndServe(s.cfg.Server.PprofPort, http.DefaultServeMux); err != nil {
-			s.logger.Errorf("Error PPROF ListenAndServe: %s", err)
-		}
-	}()
-
-	if err := s.MapHandlers(s.echo); err != nil {
-		return err
+	// Initialize and start the leaderboard worker
+	if s.leaderboardWorker != nil {
+		s.leaderboardWorker.Start()
+		defer s.leaderboardWorker.Stop()
 	}
 
 	quit := make(chan os.Signal, 1)
@@ -107,9 +134,9 @@ func (s *Server) Run() error {
 
 	<-quit
 
-	ctx, shutdown := context.WithTimeout(context.Background(), ctxTimeout*time.Second)
+	ctx, shutdown := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdown()
 
 	s.logger.Info("Server Exited Properly")
-	return s.echo.Server.Shutdown(ctx)
+	return s.echo.Shutdown(ctx)
 }
