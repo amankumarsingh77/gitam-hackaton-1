@@ -1,13 +1,20 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
+	"os"
+	"regexp"
 	"strings"
 	"time"
 
+	aiplatform "cloud.google.com/go/aiplatform/apiv1"
+	aiplatformpb "cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
 	"github.com/google/generative-ai-go/genai"
 	openai "github.com/sashabaranov/go-openai"
 	"google.golang.org/api/option"
@@ -16,6 +23,12 @@ import (
 	"github.com/AleksK1NG/api-mc/internal/chapter"
 	"github.com/AleksK1NG/api-mc/internal/models"
 	"github.com/AleksK1NG/api-mc/pkg/logger"
+	"github.com/google/uuid"
+
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/credentials"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3"
 )
 
 type LessonContent struct {
@@ -33,7 +46,9 @@ type aiService struct {
 	cfg          *config.Config
 	openaiClient *openai.Client
 	geminiClient *genai.Client
+	vertexClient *aiplatform.PredictionClient
 	logger       logger.Logger
+	s3Client     *s3.S3
 }
 
 func NewAIService(cfg *config.Config, logger logger.Logger) (chapter.AIService, error) {
@@ -42,6 +57,7 @@ func NewAIService(cfg *config.Config, logger logger.Logger) (chapter.AIService, 
 	if cfg.OpenAI.OrgID != "" {
 		openaiConfig.OrgID = cfg.OpenAI.OrgID
 	}
+
 	if cfg.OpenAI.Timeout > 0 {
 		openaiConfig.HTTPClient = &http.Client{
 			Timeout: cfg.OpenAI.Timeout,
@@ -61,18 +77,103 @@ func NewAIService(cfg *config.Config, logger logger.Logger) (chapter.AIService, 
 		return nil, fmt.Errorf("failed to create Gemini client: %v", err)
 	}
 
+	creds, err := os.ReadFile("/Users/amankumar/Documents/GitProjects/Go/gitam-hackaton-1/backend/credential.json")
+	if err != nil {
+		log.Fatalf("Failed to read credentials: %v", err)
+	}
+	if creds == nil {
+		log.Fatalf("Failed to read credentials: %v", err)
+	}
+	// credential, err := google.CredentialsFromJSON(ctx, creds)
+	// if err != nil {
+	// 	log.Fatalf("Failed to create credentials: %v", err)
+	// }
+	client, err := aiplatform.NewPredictionClient(ctx, option.WithCredentialsJSON(creds))
+	if err != nil {
+		log.Fatalf("Failed to create prediction client: %v", err)
+	}
+
+	// Initialize AWS S3 client for Cloudflare R2
+	awsConfig := &aws.Config{
+		Credentials:      credentials.NewStaticCredentials(cfg.AWS.AccessKey, cfg.AWS.SecretKey, ""),
+		Endpoint:         aws.String(cfg.AWS.Endpoint),
+		Region:           aws.String(cfg.AWS.Region),
+		S3ForcePathStyle: aws.Bool(true), // Required for Cloudflare R2
+	}
+
+	// If region is not specified, default to "auto" for Cloudflare R2
+	if cfg.AWS.Region == "" {
+		awsConfig.Region = aws.String("auto")
+	}
+
+	if cfg.AWS.UseSSL {
+		awsConfig.DisableSSL = aws.Bool(false)
+	} else {
+		awsConfig.DisableSSL = aws.Bool(true)
+	}
+
+	sess, err := session.NewSession(awsConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create AWS session: %v", err)
+	}
+
+	s3Client := s3.New(sess)
+
 	return &aiService{
 		cfg:          cfg,
 		openaiClient: openaiClient,
 		geminiClient: geminiClient,
+		vertexClient: client,
 		logger:       logger,
+		s3Client:     s3Client,
 	}, nil
 }
 
-func (s *aiService) GenerateMemes(ctx context.Context, topic string, count int) ([]*models.LessonMedia, error) {
+func (s *aiService) GenerateMemes(ctx context.Context, topic string, count int, model string) ([]*models.LessonMedia, error) {
+	// Initial prompt for meme generation - keep it short
 	prompt := fmt.Sprintf("Create a funny and educational meme about %s", topic)
+	geminiModel := s.geminiClient.GenerativeModel("gemini-2.0-flash")
+	geminiModel.SetTemperature(0.3)
+	geminiModel.SetTopK(20)
+	geminiModel.SetTopP(0.8)
+	geminiModel.SetMaxOutputTokens(8192)
+
+	// Request a concise prompt from Gemini
+	promptGeneration := fmt.Sprintf("Create a concise prompt (under 500 characters) for generating a funny and educational meme about %s.", topic)
+	promptresp, err := geminiModel.GenerateContent(ctx, genai.Text(promptGeneration))
+	if err != nil {
+		s.logger.Warnf("Failed to generate enhanced prompt with Gemini: %v. Using default prompt.", err)
+	} else if len(promptresp.Candidates) > 0 && len(promptresp.Candidates[0].Content.Parts) > 0 {
+		// Use the Gemini-generated prompt for the image generation
+		enhancedPrompt := string(promptresp.Candidates[0].Content.Parts[0].(genai.Text))
+		if enhancedPrompt != "" {
+			// Ensure the prompt is within character limits
+			if len(enhancedPrompt) > 950 {
+				enhancedPrompt = enhancedPrompt[:950]
+				s.logger.Warnf("Truncated Gemini prompt to 950 characters")
+			}
+			prompt = enhancedPrompt
+			s.logger.Infof("Using Gemini-enhanced prompt (%d chars): %s", len(prompt), prompt)
+		}
+	}
+
+	// Choose image generation service based on model parameter
+	if model == "gemini" {
+		// Use Vertex AI for image generation
+		return s.generateVertexAIImages(ctx, prompt, count, topic)
+	} else {
+		// Default to OpenAI for image generation
+		return s.generateOpenAIImages(ctx, prompt, count, topic)
+	}
+}
+
+// Helper method to generate images using OpenAI
+func (s *aiService) generateOpenAIImages(ctx context.Context, prompt string, count int, topic string) ([]*models.LessonMedia, error) {
+	s.logger.Infof("Generating %d memes with OpenAI for topic: %s", count, topic)
+	s.logger.Debugf("Using prompt: %s", prompt)
 
 	req := openai.ImageRequest{
+		Model:          "dall-e-3",
 		Prompt:         prompt,
 		Size:           openai.CreateImageSize1024x1024,
 		N:              count,
@@ -81,21 +182,261 @@ func (s *aiService) GenerateMemes(ctx context.Context, topic string, count int) 
 
 	resp, err := s.openaiClient.CreateImage(ctx, req)
 	if err != nil {
-		s.logger.Errorf("Failed to generate memes: %v", err)
-		return nil, fmt.Errorf("failed to generate memes: %v", err)
+		s.logger.Errorf("Failed to generate memes with OpenAI: %v", err)
+		return nil, fmt.Errorf("failed to generate memes with OpenAI: %v", err)
 	}
+
+	s.logger.Infof("Successfully generated %d images with OpenAI", len(resp.Data))
 
 	var memes []*models.LessonMedia
 	for i, img := range resp.Data {
+		s.logger.Debugf("Processing image %d: %s", i+1, img.URL)
+
+		// Upload image to Cloudflare R2 and get public URL
+		publicURL, err := s.uploadImageToR2(ctx, img.URL, fmt.Sprintf("meme_%s_%d", sanitizeObjectName(topic), i+1))
+		if err != nil {
+			s.logger.Errorf("Failed to upload image %d to R2: %v", i+1, err)
+			// If upload fails, use the original URL
+			s.logger.Infof("Using original OpenAI URL as fallback for image %d", i+1)
+			meme := &models.LessonMedia{
+				MediaType:   "meme",
+				URL:         img.URL,
+				Description: fmt.Sprintf("Educational meme about %s (#%d)", topic, i+1),
+			}
+			memes = append(memes, meme)
+			continue
+		}
+
+		s.logger.Infof("Successfully uploaded image %d to R2: %s", i+1, publicURL)
 		meme := &models.LessonMedia{
 			MediaType:   "meme",
-			URL:         img.URL,
+			URL:         publicURL,
 			Description: fmt.Sprintf("Educational meme about %s (#%d)", topic, i+1),
 		}
 		memes = append(memes, meme)
 	}
 
 	return memes, nil
+}
+
+// Helper method to generate images using Vertex AI
+func (s *aiService) generateVertexAIImages(ctx context.Context, prompt string, count int, topic string) ([]*models.LessonMedia, error) {
+	s.logger.Infof("Generating %d memes with Vertex AI for topic: %s", count, topic)
+	s.logger.Debugf("Using prompt: %s", prompt)
+
+	// Create the image generation request
+	var temp float32 = 0.4
+	var topK float32 = 32
+	var topP float32 = 1.0
+	var candidateCount int32 = int32(count)
+	var maxOutputTokens int32 = 2048
+	imgRequest := &aiplatformpb.GenerateContentRequest{
+		Model: "imagen-3.0-generate-002", // Update with the correct model path
+		Contents: []*aiplatformpb.Content{
+			{
+				Parts: []*aiplatformpb.Part{
+					{
+						Data: &aiplatformpb.Part_Text{
+							Text: prompt,
+						},
+					},
+				},
+			},
+		},
+
+		GenerationConfig: &aiplatformpb.GenerationConfig{
+			Temperature:     &temp,
+			TopK:            &topK,
+			TopP:            &topP,
+			CandidateCount:  &candidateCount,
+			MaxOutputTokens: &maxOutputTokens,
+		},
+	}
+
+	// Make the request to Vertex AI
+	response, err := s.vertexClient.GenerateContent(ctx, imgRequest)
+	if err != nil {
+		s.logger.Errorf("Failed to generate memes with Vertex AI: %v", err)
+		return nil, fmt.Errorf("failed to generate memes with Vertex AI: %v", err)
+	}
+
+	s.logger.Infof("Successfully received response from Vertex AI with %d candidates", len(response.Candidates))
+
+	var memes []*models.LessonMedia
+	sanitizedTopic := sanitizeObjectName(topic)
+
+	// Process the response and extract image URLs
+	for i, candidate := range response.Candidates {
+		if len(candidate.Content.Parts) == 0 {
+			s.logger.Warnf("Candidate %d has no content parts", i+1)
+			continue
+		}
+
+		// Extract image data from response
+		var imageURL string
+		for _, part := range candidate.Content.Parts {
+			if imgPart, ok := part.Data.(*aiplatformpb.Part_FileData); ok {
+				// For this example, assuming the image data is stored somewhere and a URL is returned
+				// You may need to upload the image to your storage and generate a URL
+				// or extract a URL directly from the response, depending on how Vertex AI returns images
+				imageURL = imgPart.FileData.MimeType // This is a placeholder, replace with actual URL extraction logic
+				s.logger.Debugf("Found image data in candidate %d", i+1)
+				break
+			}
+		}
+
+		if imageURL == "" {
+			s.logger.Warnf("No image URL found in candidate %d", i+1)
+			continue
+		}
+
+		s.logger.Debugf("Processing image %d from Vertex AI", i+1)
+
+		// Upload image to Cloudflare R2 and get public URL
+		publicURL, err := s.uploadImageToR2(ctx, imageURL, fmt.Sprintf("meme_%s_%d", sanitizedTopic, i+1))
+		if err != nil {
+			s.logger.Errorf("Failed to upload image %d to R2: %v", i+1, err)
+			// If upload fails, use the original URL
+			s.logger.Infof("Using original Vertex AI URL as fallback for image %d", i+1)
+			meme := &models.LessonMedia{
+				MediaType:   "meme",
+				URL:         imageURL,
+				Description: fmt.Sprintf("Educational meme about %s (#%d)", topic, i+1),
+			}
+			memes = append(memes, meme)
+			continue
+		}
+
+		s.logger.Infof("Successfully uploaded image %d to R2: %s", i+1, publicURL)
+		meme := &models.LessonMedia{
+			MediaType:   "meme",
+			URL:         publicURL,
+			Description: fmt.Sprintf("Educational meme about %s (#%d)", topic, i+1),
+		}
+		memes = append(memes, meme)
+	}
+
+	if len(memes) == 0 {
+		s.logger.Errorf("No valid images generated from Vertex AI")
+		return nil, fmt.Errorf("no valid images generated from Vertex AI")
+	}
+
+	s.logger.Infof("Successfully processed %d images from Vertex AI", len(memes))
+	return memes, nil
+}
+
+// uploadImageToR2 downloads an image from a URL and uploads it to Cloudflare R2
+func (s *aiService) uploadImageToR2(ctx context.Context, imageURL string, objectName string) (string, error) {
+	// Create a unique object name with UUID to avoid collisions
+	objectID := uuid.New().String()
+
+	// Use bucket name from config or default to "educational-media"
+	bucketName := s.cfg.AWS.BucketName
+	if bucketName == "" {
+		bucketName = "educational-media"
+	}
+
+	// Ensure the object name has a proper extension
+	if !strings.Contains(objectName, ".") {
+		objectName = objectName + ".png" // Default to PNG if no extension
+	}
+
+	// Create a unique object key
+	objectKey := fmt.Sprintf("%s/%s", objectID, objectName)
+
+	// Download the image from the URL
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to download image: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to download image, status: %s", resp.Status)
+	}
+
+	// Read the content type
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "image/png" // Default content type
+	}
+
+	// Read the image data into a buffer
+	imageData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read image data: %w", err)
+	}
+
+	// Check if the bucket exists, create if it doesn't
+	_, err = s.s3Client.HeadBucketWithContext(ctx, &s3.HeadBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+
+	if err != nil {
+		// Bucket doesn't exist, create it
+		_, err = s.s3Client.CreateBucketWithContext(ctx, &s3.CreateBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err != nil {
+			return "", fmt.Errorf("failed to create bucket: %w", err)
+		}
+
+		// Set bucket policy to make objects public
+		policy := fmt.Sprintf(`{
+			"Version": "2012-10-17",
+			"Statement": [
+				{
+					"Effect": "Allow",
+					"Principal": "*",
+					"Action": "s3:GetObject",
+					"Resource": "arn:aws:s3:::%s/*"
+				}
+			]
+		}`, bucketName)
+
+		_, err = s.s3Client.PutBucketPolicyWithContext(ctx, &s3.PutBucketPolicyInput{
+			Bucket: aws.String(bucketName),
+			Policy: aws.String(policy),
+		})
+		if err != nil {
+			s.logger.Warnf("Failed to set bucket policy: %v", err)
+			// Continue even if policy setting fails
+		}
+	}
+
+	// Upload the image to R2
+	_, err = s.s3Client.PutObjectWithContext(ctx, &s3.PutObjectInput{
+		Bucket:      aws.String(bucketName),
+		Key:         aws.String(objectKey),
+		Body:        bytes.NewReader(imageData),
+		ContentType: aws.String(contentType),
+		ACL:         aws.String("public-read"), // Make the object publicly accessible
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to upload image to R2: %w", err)
+	}
+
+	// Construct the public URL
+	var publicURL string
+
+	// If a custom public URL is provided in the config, use that
+	if s.cfg.AWS.PublicURL != "" {
+		publicURL = fmt.Sprintf("%s/%s", strings.TrimRight(s.cfg.AWS.PublicURL, "/"), objectKey)
+	} else if s.cfg.AWS.MinioEndpoint != "" {
+		// If you have a custom domain set up for your R2 bucket
+		publicURL = fmt.Sprintf("https://%s/%s/%s", s.cfg.AWS.MinioEndpoint, bucketName, objectKey)
+	} else {
+		// Default Cloudflare R2 URL format
+		publicURL = fmt.Sprintf("https://%s.r2.cloudflarestorage.com/%s", bucketName, objectKey)
+	}
+
+	return publicURL, nil
 }
 
 func (s *aiService) GenerateChapterContent(ctx context.Context, prompt string, subject string, grade int) (*models.Chapter, error) {
@@ -106,17 +447,24 @@ Respond ONLY with a JSON object in the following format (no additional text, jus
 {
     "recommended_lessons": 5,
     "complexity_level": "basic",
-    "key_concepts": ["concept1", "concept2"],
-    "prerequisites": ["prereq1", "prereq2"],
-    "learning_outcomes": ["outcome1", "outcome2"]
+    "key_concepts": ["concept1", "concept2", "concept3", "concept4"],
+    "prerequisites": ["prereq1", "prereq2", "prereq3"],
+    "learning_outcomes": ["outcome1", "outcome2", "outcome3", "outcome4"]
 }
 
-Notes:
-- recommended_lessons must be between 3 and 10
-- complexity_level must be one of: "basic", "intermediate", "advanced"
-- consider grade level, topic complexity, and standard curriculum
-- ensure all arrays have at least 2 items
-- respond with valid JSON only, no other text`, prompt, grade, subject)
+Analysis Guidelines:
+- recommended_lessons: Integer between 3 and 8 based on topic scope
+- complexity_level: Must be "basic", "intermediate", or "advanced" based on grade level
+- key_concepts: 4-6 main concepts that should be covered in the chapter
+- prerequisites: 2-4 knowledge areas students should already understand
+- learning_outcomes: 4-6 specific, measurable skills students will gain
+
+Consider:
+- Grade-appropriate content complexity
+- Standard curriculum requirements
+- Logical progression of concepts
+- Measurable learning objectives
+- Appropriate scope for the topic`, prompt, grade, subject)
 
 	model := s.geminiClient.GenerativeModel("gemini-2.0-flash")
 	model.SetTemperature(0.3)
@@ -148,7 +496,7 @@ Notes:
 		return nil, fmt.Errorf("failed to parse topic analysis: %w, response: %s", err, analysisText)
 	}
 
-	if analysis.RecommendedLessons < 3 || analysis.RecommendedLessons > 10 {
+	if analysis.RecommendedLessons < 3 || analysis.RecommendedLessons > 8 {
 		analysis.RecommendedLessons = 5
 	}
 	if analysis.ComplexityLevel == "" {
@@ -157,12 +505,25 @@ Notes:
 
 	var allLessons []LessonContent
 
-	chapterPrompt := fmt.Sprintf(`Create a title and description for a chapter about "%s" for grade %d %s students.
+	chapterPrompt := fmt.Sprintf(`Create a structured title and description for a chapter about "%s" for grade %d %s students.
+
 Response format:
 {
-    "title": "Chapter Title",
-    "description": "Chapter overview including prerequisites"
-}`, prompt, grade, subject)
+    "title": "Clear and Descriptive Chapter Title",
+    "description": "Comprehensive chapter overview that includes:
+    - Main topics covered
+    - Key learning objectives
+    - Prerequisites knowledge
+    - Relevance to curriculum
+    - Practical applications"
+}
+
+Guidelines:
+- Title should be concise but descriptive
+- Description should be 3-5 sentences
+- Include grade-appropriate language
+- Highlight practical applications of the content
+- Connect to curriculum standards`, prompt, grade, subject)
 
 	chapterResp, err := model.GenerateContent(ctx, genai.Text(chapterPrompt))
 	if err != nil {
@@ -185,63 +546,82 @@ Response format:
 			endIdx = analysis.RecommendedLessons
 		}
 
-		lessonPrompt := fmt.Sprintf(`Create %d lessons (orders %d-%d) for the chapter about "%s" for grade %d %s students.
+		// Add context about previous lessons for continuity
+		var previousLessonContext string
+		if i > 0 && len(allLessons) > 0 {
+			previousLessonContext = fmt.Sprintf(`
+Previous lessons covered:
+%s
 
-Each lesson should follow a consistent structure with clear section markers for easy frontend rendering.
+Ensure these new lessons build upon previous content and maintain logical progression.`, formatPreviousLessons(allLessons))
+		}
+
+		// Limit the number of image prompts to avoid rate limits
+		lessonPrompt := fmt.Sprintf(`Create %d lessons (orders %d-%d) for the chapter about "%s" for grade %d %s students.%s
+
+Each lesson must follow a consistent, structured format with clear section markers for frontend rendering.
 
 Response format:
 {
     "lessons": [
         {
             "title": "Lesson Title",
-            "description": "Brief overview",
+            "description": "Brief overview of lesson content and goals",
             "content": {
-                "introduction": "Introduction:\nEngaging hook text that introduces the topic and why it matters. This should be 2-3 paragraphs with clear explanations suitable for the grade level.",
+                "introduction": "Introduction:\nConcise introduction that presents the topic and establishes relevance. Include 2-3 paragraphs with clear explanations appropriate for grade level.",
                 "core_concepts": [
                     {
                         "title": "Concept Title",
-                        "explanation": "Clear explanation with examples and analogies appropriate for grade %d students. Use simple language and build on prior knowledge.",
-                        "real_world_example": "Concrete example showing how this concept applies in the real world",
-                        "fun_fact": "Interesting and memorable fact related to this concept"
+                        "explanation": "Detailed explanation with examples appropriate for grade %d students. Use clear language and build on prior knowledge.",
+                        "real_world_example": "Practical application demonstrating how this concept is used in real-world contexts",
+                        "key_points": ["Key point 1", "Key point 2", "Key point 3"]
                     }
                 ],
                 "visual_elements": [
                     {
                         "type": "diagram",
-                        "description": "Description of what the diagram should show",
-                        "caption": "Explanatory caption for the diagram"
+                        "description": "Specific description of what the diagram should illustrate",
+                        "caption": "Clear explanatory caption for the diagram"
                     }
                 ],
                 "interactive_elements": [
                     {
                         "type": "activity",
                         "title": "Activity Title",
-                        "description": "Clear step-by-step instructions",
-                        "materials_needed": ["item1", "item2"],
-                        "expected_outcome": "What students will learn from this activity"
+                        "description": "Numbered step-by-step instructions for completing the activity",
+                        "materials_needed": ["Required item 1", "Required item 2"],
+                        "expected_outcome": "Specific learning outcome students will achieve through this activity"
                     }
                 ],
-                "summary": "Concise summary of key points covered in the lesson, reinforcing the main concepts",
-                "challenge": "Optional extension activity or thought-provoking question to deepen understanding"
+                "summary": "Structured summary of key concepts covered in the lesson, reinforcing main learning points",
+                "assessment": "Formative assessment questions or tasks to evaluate understanding of lesson content"
             },
             "order": %d,
             "difficulty": "basic",
             "duration_minutes": 30,
-            "image_prompts": ["Generate an educational illustration showing...", "Create a visual representation of..."],
-            "learning_objectives": ["Students will be able to...", "Students will understand..."]
+            "image_prompts": ["Generate an educational illustration showing specific concept..."],
+            "learning_objectives": ["Students will be able to demonstrate specific skill...", "Students will understand specific concept..."]
         }
     ]
 }
 
-Important formatting guidelines:
-1. Use clear section headers for different content areas (Introduction, Core Concepts, etc.)
-2. Keep paragraphs short (3-5 sentences) for better readability
-3. Include code examples with proper formatting using triple backticks where appropriate
-4. Use bullet points for lists
-5. Ensure content is engaging, accurate, and grade-appropriate
-6. Each lesson should build logically on previous ones
-7. Include clear learning objectives that are measurable
-8. Make image prompts specific enough to generate relevant educational illustrations`, endIdx-i, i+1, endIdx, prompt, grade, subject, grade, i+1)
+Lesson Structure Plan:
+1. Introduction - Present topic clearly with context and relevance
+2. Core Concepts - Present 2-4 key concepts with explanations, examples, and applications
+3. Visual Elements - Include 1-2 visual aids that support understanding of core concepts
+4. Interactive Elements - Provide 1-2 hands-on activities that reinforce learning
+5. Summary - Consolidate key points in a structured format
+6. Assessment - Include 2-3 questions or tasks to check understanding
+
+Content Guidelines:
+1. Use clear section headers for all content areas
+2. Maintain consistent paragraph length (3-5 sentences) for readability
+3. Include properly formatted code examples where appropriate
+4. Use numbered lists for sequential instructions and bullet points for non-sequential items
+5. Ensure content difficulty matches grade level appropriately
+6. Structure each lesson to build logically on previous content
+7. Create specific, measurable learning objectives
+8. IMPORTANT: Provide only ONE image prompt per lesson to avoid rate limits`, endIdx-i, i+1, endIdx, prompt, grade, subject, previousLessonContext, grade, i+1)
 
 		lessonResp, err := model.GenerateContent(ctx, genai.Text(lessonPrompt))
 		if err != nil {
@@ -255,6 +635,13 @@ Important formatting guidelines:
 
 		if err := json.Unmarshal([]byte(lessonText), &lessonChunk); err != nil {
 			return nil, fmt.Errorf("failed to parse lessons %d-%d: %w, content: %s", i+1, endIdx, err, lessonText)
+		}
+
+		// Ensure each lesson has at most 1 image prompt to avoid rate limits
+		for i := range lessonChunk.Lessons {
+			if len(lessonChunk.Lessons[i].ImagePrompts) > 1 {
+				lessonChunk.Lessons[i].ImagePrompts = lessonChunk.Lessons[i].ImagePrompts[:1]
+			}
 		}
 
 		allLessons = append(allLessons, lessonChunk.Lessons...)
@@ -295,7 +682,15 @@ Important formatting guidelines:
 						content.WriteString(fmt.Sprintf("%s\n", concept["title"]))
 						content.WriteString(fmt.Sprintf("%s\n\n", concept["explanation"]))
 						content.WriteString(fmt.Sprintf("Real-World Example: %s\n", concept["real_world_example"]))
-						content.WriteString(fmt.Sprintf("Fun Fact: %s\n\n", concept["fun_fact"]))
+
+						// Handle key points instead of fun facts
+						if keyPoints, ok := concept["key_points"].([]interface{}); ok && len(keyPoints) > 0 {
+							content.WriteString("Key Points:\n")
+							for _, point := range keyPoints {
+								content.WriteString(fmt.Sprintf("• %s\n", point))
+							}
+							content.WriteString("\n")
+						}
 					}
 				}
 			}
@@ -314,25 +709,20 @@ Important formatting guidelines:
 				content.WriteString("\n")
 			}
 
-			// Generate images for each prompt
+			// Generate images for each prompt - but limit to avoid rate limits
 			if len(l.ImagePrompts) > 0 {
 				if _, ok := contentObj["visual_elements"]; !ok {
 					content.WriteString("Visual Aids:\n")
 				}
-				for _, prompt := range l.ImagePrompts {
-					content.WriteString(fmt.Sprintf("• %s\n", prompt))
 
-					// Only generate images if OpenAI API key is available
-					if s.cfg.OpenAI.APIKey != "" {
-						media, err := s.GenerateImageFromPrompt(ctx, prompt)
-						if err != nil {
-							s.logger.Warnf("Failed to generate image for prompt '%s': %v", prompt, err)
-							continue
-						}
-						// The LessonID will be set by the repository layer after the lesson is created
-						media.Description = fmt.Sprintf("Generated illustration: %s", prompt)
-					}
+				// Only include the first image prompt in the content
+				if len(l.ImagePrompts) > 0 {
+					prompt := l.ImagePrompts[0]
+					content.WriteString(fmt.Sprintf("• %s\n", prompt))
 				}
+
+				// Note: We don't generate images here anymore to avoid rate limits
+				// This is now handled in the usecase layer with proper rate limiting
 				content.WriteString("\n")
 			}
 
@@ -359,9 +749,11 @@ Important formatting guidelines:
 				content.WriteString(summary)
 				content.WriteString("\n\n")
 			}
-			if challenge, ok := contentObj["challenge"].(string); ok {
-				content.WriteString("Extra Challenge:\n")
-				content.WriteString(challenge)
+
+			// Handle assessment section instead of challenge
+			if assessment, ok := contentObj["assessment"].(string); ok {
+				content.WriteString("Assessment:\n")
+				content.WriteString(assessment)
 			}
 		} else {
 			content.WriteString(fmt.Sprintf("%v", l.Content))
@@ -388,29 +780,66 @@ Important formatting guidelines:
 }
 
 func (s *aiService) GenerateImageFromPrompt(ctx context.Context, prompt string) (*models.LessonMedia, error) {
+	// Always generate only 1 image to avoid rate limits
 	req := openai.ImageRequest{
+		Model:          "dall-e-3", // Use DALL-E 3 for better quality
 		Prompt:         prompt,
 		Size:           openai.CreateImageSize1024x1024,
-		N:              1,
+		N:              1, // Always generate only 1 image
 		ResponseFormat: openai.CreateImageResponseFormatURL,
 	}
 
+	s.logger.Infof("Generating image with prompt: %s", prompt)
 	resp, err := s.openaiClient.CreateImage(ctx, req)
 	if err != nil {
+		s.logger.Errorf("Failed to generate image: %v", err)
 		return nil, fmt.Errorf("failed to generate image: %w", err)
 	}
 
 	if len(resp.Data) == 0 {
+		s.logger.Errorf("No image generated from OpenAI")
 		return nil, fmt.Errorf("no image generated")
 	}
 
+	s.logger.Infof("Successfully generated image, uploading to R2")
+
+	// Upload image to Cloudflare R2 and get public URL
+	sanitizedPrompt := sanitizeObjectName(prompt)
+	publicURL, err := s.uploadImageToR2(ctx, resp.Data[0].URL, fmt.Sprintf("illustration_%s", sanitizedPrompt))
+	if err != nil {
+		s.logger.Errorf("Failed to upload image to R2: %v", err)
+		// If upload fails, use the original URL
+		s.logger.Infof("Using original OpenAI URL as fallback")
+		media := &models.LessonMedia{
+			MediaType:   "image",
+			URL:         resp.Data[0].URL,
+			Description: fmt.Sprintf("Generated illustration: %s", prompt),
+		}
+		return media, nil
+	}
+
+	s.logger.Infof("Successfully uploaded image to R2: %s", publicURL)
 	media := &models.LessonMedia{
 		MediaType:   "image",
-		URL:         resp.Data[0].URL,
+		URL:         publicURL,
 		Description: fmt.Sprintf("Generated illustration: %s", prompt),
 	}
 
 	return media, nil
+}
+
+// sanitizeObjectName removes special characters and limits length for object names
+func sanitizeObjectName(name string) string {
+	// Replace special characters with underscores
+	reg := regexp.MustCompile(`[^a-zA-Z0-9_-]`)
+	sanitized := reg.ReplaceAllString(name, "_")
+
+	// Limit length to 50 characters
+	if len(sanitized) > 50 {
+		sanitized = sanitized[:50]
+	}
+
+	return sanitized
 }
 
 func cleanJSONResponse(response string) string {
@@ -585,4 +1014,20 @@ Requirements:
 	}
 
 	return quiz, questions, nil
+}
+
+func formatPreviousLessons(lessons []LessonContent) string {
+	var result strings.Builder
+	for _, lesson := range lessons {
+		result.WriteString(fmt.Sprintf("- Lesson %d: %s\n", lesson.Order, lesson.Title))
+		if objectives := lesson.LearningObjectives; len(objectives) > 0 {
+			result.WriteString("  Objectives:\n")
+			for i, obj := range objectives {
+				if i < 2 {
+					result.WriteString(fmt.Sprintf("  • %s\n", obj))
+				}
+			}
+		}
+	}
+	return result.String()
 }

@@ -5,6 +5,15 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { setCurrentLesson, updateChapterProgress, fetchChapterById, fetchLessonById } from '../store/slices/chaptersSlice';
 import { completeLesson } from '../store/slices/userSlice';
 
+// ===== Component Imports =====
+import LessonHeader from '../components/lesson/LessonHeader';
+import LessonOverview from '../components/lesson/LessonOverview';
+import LessonContent from '../components/lesson/LessonContent';
+import LessonSummary from '../components/lesson/LessonSummary';
+import ProgressBar from '../components/lesson/ProgressBar';
+import LoadingSpinner from '../components/common/LoadingSpinner';
+import ErrorMessage from '../components/common/ErrorMessage';
+
 // Interactive elements for the lesson
 function InteractiveElement({ type, content, onComplete }) {
     const [isCompleted, setIsCompleted] = useState(false);
@@ -138,108 +147,44 @@ function FormattedContent({ content }) {
     );
 }
 
-function ProgressBar({ currentStep, totalSteps }) {
-    return (
-        <div className="mb-8">
-            <div className="flex justify-between text-sm mb-2">
-                <span className="font-medium text-slate-600">Progress</span>
-                <span className="font-medium text-slate-700">{Math.round((currentStep / totalSteps) * 100)}%</span>
-            </div>
-            <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                <motion.div
-                    initial={{ width: 0 }}
-                    animate={{ width: `${(currentStep / totalSteps) * 100}%` }}
-                    transition={{ duration: 0.5 }}
-                    className="h-1.5 bg-slate-500 rounded-full"
-                ></motion.div>
-            </div>
-        </div>
-    );
-}
-
-// Table of Contents component for lesson navigation
-function TableOfContents({ content }) {
-    if (!content) return null;
-
-    const sections = [];
-
-    // Extract section titles from content
-    const introMatch = content.match(/📚 Introduction/);
-    if (introMatch) sections.push({ title: "Introduction", emoji: "📚" });
-
-    const conceptsMatch = content.match(/🎯 Core Concepts/);
-    if (conceptsMatch) sections.push({ title: "Core Concepts", emoji: "🎯" });
-
-    // Extract individual concepts
-    const conceptTitles = content.match(/📍 ([^\n]+)/g);
-    if (conceptTitles) {
-        conceptTitles.forEach(match => {
-            const title = match.replace("📍 ", "").trim();
-            sections.push({ title, emoji: "📍", isSubsection: true });
-        });
-    }
-
-    const visualsMatch = content.match(/🖼️ Visual Aids/);
-    if (visualsMatch) sections.push({ title: "Visual Aids", emoji: "🖼️" });
-
-    const activitiesMatch = content.match(/🎮 Interactive Activities/);
-    if (activitiesMatch) sections.push({ title: "Interactive Activities", emoji: "🎮" });
-
-    const summaryMatch = content.match(/📝 Summary/);
-    if (summaryMatch) sections.push({ title: "Summary", emoji: "📝" });
-
-    const challengeMatch = content.match(/🏆 Extra Challenge/);
-    if (challengeMatch) sections.push({ title: "Extra Challenge", emoji: "🏆" });
-
-    if (sections.length === 0) return null;
-
-    return (
-        <div className="bg-white p-5 rounded-lg mb-8 border border-slate-200 shadow-sm">
-            <h3 className="font-medium text-lg mb-4 text-slate-800">Contents</h3>
-            <ul className="space-y-3">
-                {sections.map((section, index) => (
-                    <li key={index} className={section.isSubsection ? "ml-5" : ""}>
-                        <a
-                            href={`#${section.title.toLowerCase().replace(/\s+/g, '-')}`}
-                            className={`flex items-center hover:text-slate-900 transition-colors ${section.isSubsection ? 'text-sm text-slate-600' : 'text-slate-700 font-medium'}`}
-                        >
-                            {section.isSubsection ? (
-                                <span className="w-1.5 h-1.5 rounded-full bg-slate-400 mr-2"></span>
-                            ) : (
-                                <span className="mr-2 opacity-80">{section.emoji}</span>
-                            )}
-                            {section.title}
-                        </a>
-                    </li>
-                ))}
-            </ul>
-        </div>
-    );
-}
+// ===== Animation Variants =====
+const pageTransition = {
+    initial: { opacity: 0, y: 20 },
+    animate: { opacity: 1, y: 0 },
+    exit: { opacity: 0, y: -20 },
+    transition: { duration: 0.4, ease: 'easeInOut' }
+};
 
 function LessonView() {
+    // ===== State Management =====
     const [currentStep, setCurrentStep] = useState(1);
-    const [totalSteps, setTotalSteps] = useState(3); // Default: overview, content, summary
+    const [totalSteps, setTotalSteps] = useState(3); // Overview, Content, Summary
     const [isCompleted, setIsCompleted] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
     const [lesson, setLesson] = useState(null);
+    const [error, setError] = useState(null);
     const contentRef = useRef(null);
 
+    // ===== Hooks =====
     const { chapterId, lessonId } = useParams();
     const dispatch = useDispatch();
     const navigate = useNavigate();
 
+    // ===== Redux Selectors =====
     const { chapters, currentChapterId, isLoading: chaptersLoading } = useSelector(state => state.chapters);
     const { completedLessons } = useSelector(state => state.user);
 
-    // Fetch chapter data if not already loaded
+    // ===== Fetch Chapter Data =====
     useEffect(() => {
         if (chapterId) {
             setIsLoading(true);
+            setError(null);
+
             dispatch(fetchChapterById(chapterId))
                 .unwrap()
                 .catch(error => {
                     console.error("Error fetching chapter:", error);
+                    setError("Failed to load chapter data. Please try again later.");
                 })
                 .finally(() => {
                     setIsLoading(false);
@@ -247,7 +192,7 @@ function LessonView() {
         }
     }, [dispatch, chapterId]);
 
-    // Find current chapter - check both id and chapter_id fields
+    // ===== Find Current Chapter =====
     const chapter = chapters.find(ch =>
         ch.id === chapterId ||
         ch.chapter_id === chapterId ||
@@ -255,17 +200,19 @@ function LessonView() {
         ch.chapter_id === currentChapterId
     );
 
-    // Set current lesson in Redux
+    // ===== Set Current Lesson in Redux =====
     useEffect(() => {
         if (chapter && lessonId) {
             dispatch(setCurrentLesson(lessonId));
         }
     }, [dispatch, chapter, lessonId]);
 
-    // Fetch lesson by ID directly from API
+    // ===== Fetch Lesson Data =====
     useEffect(() => {
         if (lessonId) {
             setIsLoading(true);
+            setError(null);
+
             dispatch(fetchLessonById(lessonId))
                 .unwrap()
                 .then(fetchedLesson => {
@@ -273,6 +220,7 @@ function LessonView() {
                 })
                 .catch(error => {
                     console.error("Error fetching lesson:", error);
+                    setError("Failed to load lesson data. Please try again later.");
                 })
                 .finally(() => {
                     setIsLoading(false);
@@ -280,108 +228,19 @@ function LessonView() {
         }
     }, [dispatch, lessonId]);
 
-    // Check if lesson is already completed
+    // ===== Check if Lesson is Completed =====
     useEffect(() => {
         if (completedLessons.includes(lessonId)) {
             setIsCompleted(true);
         }
     }, [completedLessons, lessonId]);
 
-    // Scroll to top when step changes
+    // ===== Scroll to Top on Step Change =====
     useEffect(() => {
-        window.scrollTo(0, 0);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
     }, [currentStep]);
 
-    // Show loading state
-    if (isLoading || chaptersLoading) {
-        return (
-            <div className="flex justify-center items-center h-64">
-                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-slate-600"></div>
-            </div>
-        );
-    }
-
-    // Handle chapter not found
-    if (!chapter) {
-        return (
-            <div className="text-center py-12">
-                <h2 className="font-medium text-xl mb-2 text-slate-800">Chapter not found</h2>
-                <p className="text-slate-600 mb-4">The chapter you're looking for doesn't exist or couldn't be loaded.</p>
-                <button
-                    onClick={() => navigate('/dashboard')}
-                    className="py-2 px-4 bg-slate-700 hover:bg-slate-800 text-white rounded-lg transition-colors"
-                >
-                    Back to Dashboard
-                </button>
-            </div>
-        );
-    }
-
-    // Handle lesson not found
-    if (!lesson) {
-        return (
-            <div className="text-center py-12">
-                <h2 className="font-medium text-xl mb-2 text-slate-800">Lesson not found</h2>
-                <p className="text-slate-600 mb-4">The lesson you're looking for doesn't exist or couldn't be loaded.</p>
-                <button
-                    onClick={() => navigate(`/chapters/${chapter.id || chapter.chapter_id}`)}
-                    className="py-2 px-4 bg-slate-700 hover:bg-slate-800 text-white rounded-lg transition-colors"
-                >
-                    Back to Chapter
-                </button>
-            </div>
-        );
-    }
-
-    // Extract lesson objectives and duration from description
-    const objectives = [];
-    let duration = "30 min";
-    let level = "Basic";
-
-    if (lesson.description) {
-        const descLines = lesson.description.split('\n');
-        const objectivesStartIndex = descLines.findIndex(line => line.includes('Objectives:'));
-
-        if (objectivesStartIndex !== -1) {
-            for (let i = objectivesStartIndex + 1; i < descLines.length; i++) {
-                const line = descLines[i].trim();
-                if (line.startsWith('•')) {
-                    objectives.push(line.substring(1).trim());
-                }
-                if (line.includes('min') && line.includes('|')) {
-                    const parts = line.split('|');
-                    duration = parts[0].trim();
-                    level = parts[1].trim();
-                    break;
-                }
-            }
-        }
-    }
-
-    // Mock interactive elements - in a real app, these would come from the lesson data
-    const interactiveElements = [
-        {
-            type: 'quiz',
-            content: {
-                question: 'What is the main benefit of memoization?',
-                options: [
-                    'It makes code more readable',
-                    'It reduces memory usage',
-                    'It avoids repeating calculations',
-                    'It simplifies code structure'
-                ],
-                correctIndex: 2
-            }
-        },
-        {
-            type: 'codeExample',
-            content: {
-                code: `function fibonacci(n) {\n  const memo = {};\n  \n  function fib(n) {\n    if (n <= 1) return n;\n    if (memo[n]) return memo[n];\n    \n    memo[n] = fib(n-1) + fib(n-2);\n    return memo[n];\n  }\n  \n  return fib(n);\n}`,
-                explanation: 'This implementation uses memoization to store previously calculated Fibonacci values, dramatically improving performance.'
-            }
-        }
-    ];
-
+    // ===== Navigation Handlers =====
     const handleNextStep = () => {
         if (currentStep < totalSteps) {
             setCurrentStep(currentStep + 1);
@@ -403,7 +262,9 @@ function LessonView() {
 
         // Calculate progress
         const totalLessons = chapter.lessons.length;
-        const completedLessons = chapter.lessons.findIndex(l => l.id === lesson.id || l.lesson_id === lesson.id) + 1;
+        const completedLessons = chapter.lessons.findIndex(l =>
+            l.id === lesson.id || l.lesson_id === lesson.id
+        ) + 1;
         const progress = Math.round((completedLessons / totalLessons) * 100);
 
         // Update chapter progress
@@ -413,7 +274,10 @@ function LessonView() {
         }));
 
         // Navigate to quiz or next lesson
-        const currentLessonIndex = chapter.lessons.findIndex(l => l.id === lesson.id || l.lesson_id === lesson.id);
+        const currentLessonIndex = chapter.lessons.findIndex(l =>
+            l.id === lesson.id || l.lesson_id === lesson.id
+        );
+
         if (currentLessonIndex === chapter.lessons.length - 1) {
             // Last lesson, go to quiz
             navigate(`/chapters/${chapter.id || chapter.chapter_id}/quiz`);
@@ -424,164 +288,120 @@ function LessonView() {
         }
     };
 
+    // ===== Loading State =====
+    if (isLoading || chaptersLoading) {
+        return <LoadingSpinner />;
+    }
+
+    // ===== Error State =====
+    if (error) {
+        return <ErrorMessage message={error} />;
+    }
+
+    // ===== Chapter Not Found =====
+    if (!chapter) {
+        return (
+            <div className="flex flex-col items-center justify-center py-16 px-4">
+                <div className="bg-red-50 border-l-4 border-red-500 p-6 rounded-lg max-w-md">
+                    <h2 className="font-bold text-xl mb-3 text-red-700">Chapter Not Found</h2>
+                    <p className="text-slate-700 mb-6">
+                        The chapter you're looking for doesn't exist or couldn't be loaded.
+                    </p>
+                    <button
+                        onClick={() => navigate('/dashboard')}
+                        className="py-2.5 px-5 bg-slate-800 hover:bg-slate-900 text-white rounded-lg transition-colors inline-flex items-center"
+                    >
+                        <span className="mr-2">←</span> Back to Dashboard
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
+    // ===== Lesson Not Found =====
+    if (!lesson) {
+        return (
+            <div className="flex flex-col items-center justify-center py-16 px-4">
+                <div className="bg-amber-50 border-l-4 border-amber-500 p-6 rounded-lg max-w-md">
+                    <h2 className="font-bold text-xl mb-3 text-amber-700">Lesson Not Found</h2>
+                    <p className="text-slate-700 mb-6">
+                        The lesson you're looking for doesn't exist or couldn't be loaded.
+                    </p>
+                    <button
+                        onClick={() => navigate(`/chapters/${chapter.id || chapter.chapter_id}`)}
+                        className="py-2.5 px-5 bg-slate-800 hover:bg-slate-900 text-white rounded-lg transition-colors inline-flex items-center"
+                    >
+                        <span className="mr-2">←</span> Back to Chapter
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
+    // ===== Extract Lesson Metadata =====
+    const extractLessonMetadata = () => {
+        const objectives = [];
+        let duration = "30 min";
+        let level = "Basic";
+
+        if (lesson.description) {
+            const descLines = lesson.description.split('\n');
+            const objectivesStartIndex = descLines.findIndex(line =>
+                line.includes('Objectives:')
+            );
+
+            if (objectivesStartIndex !== -1) {
+                for (let i = objectivesStartIndex + 1; i < descLines.length; i++) {
+                    const line = descLines[i].trim();
+                    if (line.startsWith('•')) {
+                        objectives.push(line.substring(1).trim());
+                    }
+                    if (line.includes('min') && line.includes('|')) {
+                        const parts = line.split('|');
+                        duration = parts[0].trim();
+                        level = parts[1].trim();
+                        break;
+                    }
+                }
+            }
+        }
+
+        return { objectives, duration, level };
+    };
+
+    const { objectives, duration, level } = extractLessonMetadata();
+
+    // ===== Render Step Content =====
     const renderStepContent = () => {
         switch (currentStep) {
             case 1: // Overview
                 return (
-                    <motion.div
-                        key="overview"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="flex flex-col max-w-2xl mx-auto p-4"
-                    >
-                        <h2 className="font-medium text-2xl mb-6 text-slate-800">{lesson.title}</h2>
-
-                        {/* Lesson info card */}
-                        <div className="bg-slate-50 p-6 rounded-lg border border-slate-200 mb-8 w-full">
-                            <div className="flex items-center justify-between mb-6">
-                                <span className="bg-slate-200 text-slate-700 text-xs font-medium px-2.5 py-1 rounded-full">
-                                    {lesson.subject}
-                                </span>
-                                <span className="bg-slate-200 text-slate-700 text-xs font-medium px-2.5 py-1 rounded-full">
-                                    Grade {lesson.grade}
-                                </span>
-                            </div>
-
-                            <div className="flex justify-between items-center mb-6 text-slate-600">
-                                <span className="text-sm">
-                                    <span className="mr-1 opacity-80">⏱️</span> {duration}
-                                </span>
-                                <span className="text-sm">
-                                    <span className="mr-1 opacity-80">📊</span> {level}
-                                </span>
-                            </div>
-
-                            {objectives.length > 0 && (
-                                <div className="mt-4">
-                                    <h3 className="font-medium text-base mb-3 text-slate-700">Learning Objectives</h3>
-                                    <ul className="list-disc pl-5 space-y-2">
-                                        {objectives.map((objective, index) => (
-                                            <li key={index} className="text-slate-600">{objective}</li>
-                                        ))}
-                                    </ul>
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Lesson image */}
-                        <div className="bg-white rounded-lg mb-8 w-full overflow-hidden shadow-sm">
-                            <img
-                                src={lesson.memeUrl || 'https://via.placeholder.com/600x400?text=Lesson+Visual'}
-                                alt={lesson.title}
-                                className="w-full object-cover h-64"
-                            />
-                        </div>
-
-                        <button
-                            onClick={handleNextStep}
-                            className="py-2.5 px-4 bg-slate-700 hover:bg-slate-800 text-white rounded-lg transition-colors w-full"
-                        >
-                            Begin Lesson
-                        </button>
-                    </motion.div>
+                    <LessonOverview
+                        lesson={lesson}
+                        objectives={objectives}
+                        duration={duration}
+                        level={level}
+                        onContinue={handleNextStep}
+                    />
                 );
             case 2: // Content
                 return (
-                    <motion.div
-                        key="content"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="max-w-3xl mx-auto p-4"
-                        ref={contentRef}
-                    >
-                        <div className="bg-white p-8 rounded-lg border border-slate-200 mb-8 shadow-sm">
-                            <h1 className="font-medium text-2xl mb-6 text-slate-800">{lesson.title}</h1>
-
-                            {/* Table of Contents */}
-                            <TableOfContents content={lesson.content} />
-
-                            {/* Formatted lesson content */}
-                            <div className="mb-8">
-                                <FormattedContent content={lesson.content} />
-                            </div>
-
-                            {/* Interactive elements - simplified */}
-                            {interactiveElements.length > 0 && (
-                                <div className="mt-8 pt-6 border-t border-slate-200">
-                                    <h3 className="font-medium text-lg mb-4 text-slate-800">Practice Activities</h3>
-                                    {interactiveElements.map((element, index) => (
-                                        <InteractiveElement
-                                            key={index}
-                                            type={element.type}
-                                            content={element.content}
-                                        />
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-
-                        <div className="flex justify-between">
-                            <button
-                                onClick={handlePrevStep}
-                                className="py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-colors"
-                            >
-                                ← Back to Overview
-                            </button>
-                            <button
-                                onClick={handleNextStep}
-                                className="py-2 px-4 bg-slate-700 hover:bg-slate-800 text-white rounded-lg transition-colors"
-                            >
-                                Continue to Summary
-                            </button>
-                        </div>
-                    </motion.div>
+                    <LessonContent
+                        lesson={lesson}
+                        contentRef={contentRef}
+                        onPrevious={handlePrevStep}
+                        onContinue={handleNextStep}
+                    />
                 );
             case 3: // Summary
                 return (
-                    <motion.div
-                        key="summary"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="max-w-2xl mx-auto p-4"
-                    >
-                        <div className="bg-white p-8 rounded-lg border border-slate-200 mb-8 shadow-sm">
-                            <h2 className="font-medium text-2xl mb-6 text-slate-800">Summary</h2>
-
-                            <div className="bg-slate-50 p-6 rounded-lg mb-8 border border-slate-200">
-                                <h3 className="font-medium text-base mb-4 text-slate-700">Key Takeaways</h3>
-                                <ul className="list-disc pl-5 space-y-2">
-                                    {objectives.map((objective, index) => (
-                                        <li key={index} className="text-slate-600">{objective}</li>
-                                    ))}
-                                </ul>
-                            </div>
-
-                            <div className="bg-slate-50 p-6 rounded-lg border border-slate-200 text-center">
-                                <h3 className="font-medium text-base mb-2 text-slate-700">Lesson Complete</h3>
-                                <p className="text-slate-600 mb-0">
-                                    You've finished this lesson. Continue your learning journey!
-                                </p>
-                            </div>
-                        </div>
-
-                        <div className="flex justify-between">
-                            <button
-                                onClick={handlePrevStep}
-                                className="py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-colors"
-                            >
-                                ← Back to Content
-                            </button>
-                            <button
-                                onClick={handleLessonComplete}
-                                className="py-2 px-4 bg-slate-700 hover:bg-slate-800 text-white rounded-lg transition-colors"
-                            >
-                                {isCompleted ? 'Next Lesson' : 'Complete & Continue'}
-                            </button>
-                        </div>
-                    </motion.div>
+                    <LessonSummary
+                        lesson={lesson}
+                        objectives={objectives}
+                        isCompleted={isCompleted}
+                        onPrevious={handlePrevStep}
+                        onComplete={handleLessonComplete}
+                    />
                 );
             default:
                 return null;
@@ -590,28 +410,24 @@ function LessonView() {
 
     return (
         <div className="max-w-7xl mx-auto px-4 py-8">
-            <div className="mb-6 flex justify-between items-center">
-                <button
-                    onClick={() => navigate(`/chapters/${chapter.id || chapter.chapter_id}`)}
-                    className="flex items-center text-slate-600 hover:text-slate-800 transition-colors"
-                >
-                    <span className="mr-1">←</span> Back to {chapter.title}
-                </button>
-
-                {isCompleted && (
-                    <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-50 text-green-700">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                        </svg>
-                        Completed
-                    </span>
-                )}
-            </div>
+            <LessonHeader
+                chapter={chapter}
+                isCompleted={isCompleted}
+                onBack={() => navigate(`/chapters/${chapter.id || chapter.chapter_id}`)}
+            />
 
             <ProgressBar currentStep={currentStep} totalSteps={totalSteps} />
 
             <AnimatePresence mode="wait">
-                {renderStepContent()}
+                <motion.div
+                    key={`step-${currentStep}`}
+                    initial="initial"
+                    animate="animate"
+                    exit="exit"
+                    variants={pageTransition}
+                >
+                    {renderStepContent()}
+                </motion.div>
             </AnimatePresence>
         </div>
     );

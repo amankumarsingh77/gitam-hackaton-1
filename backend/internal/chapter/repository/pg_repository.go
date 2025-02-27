@@ -101,10 +101,9 @@ func (r *chapterRepo) CreateLesson(ctx context.Context, lesson *models.Lesson) e
 }
 
 func (r *chapterRepo) CreateCustomLesson(ctx context.Context, lesson *models.Lesson) error {
-	// Ensure the lesson is marked as custom
+
 	lesson.IsCustom = true
 
-	// Check if the chapter exists
 	var chapterExists bool
 	if err := r.db.GetContext(ctx, &chapterExists, "SELECT EXISTS(SELECT 1 FROM chapters WHERE chapter_id = $1)", lesson.ChapterID); err != nil {
 		return fmt.Errorf("failed to check if chapter exists: %w", err)
@@ -114,29 +113,24 @@ func (r *chapterRepo) CreateCustomLesson(ctx context.Context, lesson *models.Les
 		return fmt.Errorf("chapter with ID %s does not exist", lesson.ChapterID)
 	}
 
-	// Get chapter details to set grade and subject
 	chapter := &models.Chapter{}
 	if err := r.db.GetContext(ctx, chapter, getChapterByIDQuery, lesson.ChapterID); err != nil {
 		return fmt.Errorf("failed to get chapter details: %w", err)
 	}
 
-	// Set grade and subject from the chapter
 	lesson.Grade = chapter.Grade
 	lesson.Subject = chapter.Subject
 
-	// Get the highest order for existing lessons in this chapter
 	var maxOrder int
 	err := r.db.GetContext(ctx, &maxOrder, "SELECT COALESCE(MAX(\"order\"), 0) FROM lessons WHERE chapter_id = $1", lesson.ChapterID)
 	if err != nil {
 		return fmt.Errorf("failed to get max lesson order: %w", err)
 	}
 
-	// Set the order to be one more than the highest existing order
 	lesson.Order = maxOrder + 1
 
 	log.Printf("Creating custom lesson for chapter %s with order %d", lesson.ChapterID, lesson.Order)
 
-	// Create the lesson
 	return r.db.QueryRowxContext(
 		ctx,
 		createLessonQuery,
@@ -157,13 +151,37 @@ func (r *chapterRepo) GetLessonsByChapter(ctx context.Context, chapterID uuid.UU
 	if err := r.db.SelectContext(ctx, &lessons, getLessonsByChapterQuery, chapterID); err != nil {
 		return nil, err
 	}
+
+	// Fetch media for each lesson
+	if len(lessons) > 0 {
+		// Get all media for the chapter
+		media, err := r.GetLessonMediaByChapter(ctx, chapterID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get media for chapter: %w", err)
+		}
+
+		// Create a map of lesson ID to media for efficient lookup
+		mediaByLessonID := make(map[uuid.UUID][]*models.LessonMedia)
+		for _, m := range media {
+			mediaByLessonID[m.LessonID] = append(mediaByLessonID[m.LessonID], m)
+		}
+
+		// Assign media to each lesson
+		for _, lesson := range lessons {
+			if lessonMedia, exists := mediaByLessonID[lesson.LessonID]; exists {
+				lesson.Media = lessonMedia
+			} else {
+				lesson.Media = []*models.LessonMedia{} // Empty array instead of nil for better JSON serialization
+			}
+		}
+	}
+
 	return lessons, nil
 }
 
 func (r *chapterRepo) GetCustomLessonsByChapter(ctx context.Context, chapterID uuid.UUID) ([]*models.Lesson, error) {
 	lessons := make([]*models.Lesson, 0)
 
-	// First check if the chapter exists
 	var chapterExists bool
 	if err := r.db.GetContext(ctx, &chapterExists, "SELECT EXISTS(SELECT 1 FROM chapters WHERE chapter_id = $1)", chapterID); err != nil {
 		return nil, fmt.Errorf("failed to check if chapter exists: %w", err)
@@ -173,10 +191,8 @@ func (r *chapterRepo) GetCustomLessonsByChapter(ctx context.Context, chapterID u
 		return nil, fmt.Errorf("chapter with ID %s does not exist", chapterID)
 	}
 
-	// Log the query and parameters for debugging
 	log.Printf("Executing query: %s with chapterID: %s", getCustomLessonsByChapterQuery, chapterID)
 
-	// Check if any custom lessons exist for this chapter
 	var customLessonsExist bool
 	if err := r.db.GetContext(ctx, &customLessonsExist, "SELECT EXISTS(SELECT 1 FROM lessons WHERE chapter_id = $1 AND is_custom = true)", chapterID); err != nil {
 		return nil, fmt.Errorf("failed to check if custom lessons exist: %w", err)
@@ -185,7 +201,6 @@ func (r *chapterRepo) GetCustomLessonsByChapter(ctx context.Context, chapterID u
 	log.Printf("Custom lessons exist for chapter %s: %v", chapterID, customLessonsExist)
 
 	if !customLessonsExist {
-		// Return empty slice if no custom lessons exist
 		return lessons, nil
 	}
 
@@ -194,6 +209,33 @@ func (r *chapterRepo) GetCustomLessonsByChapter(ctx context.Context, chapterID u
 	}
 
 	log.Printf("Found %d custom lessons for chapter %s", len(lessons), chapterID)
+
+	// Fetch media for each lesson
+	if len(lessons) > 0 {
+		// Get all media for the chapter
+		media, err := r.GetLessonMediaByChapter(ctx, chapterID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get media for chapter: %w", err)
+		}
+
+		// Create a map of lesson ID to media for efficient lookup
+		mediaByLessonID := make(map[uuid.UUID][]*models.LessonMedia)
+		for _, m := range media {
+			mediaByLessonID[m.LessonID] = append(mediaByLessonID[m.LessonID], m)
+		}
+
+		// Assign media to each lesson
+		for _, lesson := range lessons {
+			if lessonMedia, exists := mediaByLessonID[lesson.LessonID]; exists {
+				lesson.Media = lessonMedia
+			} else {
+				lesson.Media = []*models.LessonMedia{} // Empty array instead of nil for better JSON serialization
+			}
+		}
+
+		log.Printf("Added media to %d lessons", len(lessons))
+	}
+
 	return lessons, nil
 }
 
@@ -284,7 +326,7 @@ func (r *chapterRepo) GetQuestionByID(ctx context.Context, questionID uuid.UUID)
 
 func (r *chapterRepo) CreateQuizAttempt(ctx context.Context, attempt *models.UserQuizAttempt) (*models.UserQuizAttempt, error) {
 	attempt.AttemptID = uuid.New()
-	attempt.CreatedAt = attempt.CompletedAt // Set created_at to the same as completed_at
+	attempt.CreatedAt = attempt.CompletedAt
 
 	if err := r.db.QueryRowxContext(
 		ctx,
@@ -312,7 +354,7 @@ func (r *chapterRepo) CreateQuestionResponse(ctx context.Context, response *mode
 		response.QuestionID,
 		response.UserAnswer,
 		response.IsCorrect,
-	).StructScan(response); err != nil {
+	).Scan(&response.ResponseID); err != nil {
 		return fmt.Errorf("failed to create question response: %w", err)
 	}
 
@@ -324,5 +366,15 @@ func (r *chapterRepo) GetLessonByID(ctx context.Context, lessonID uuid.UUID) (*m
 	if err := r.db.GetContext(ctx, lesson, getLessonByIDQuery, lessonID); err != nil {
 		return nil, fmt.Errorf("failed to get lesson by ID: %w", err)
 	}
+
+	// Fetch media for the lesson
+	var media []*models.LessonMedia
+	if err := r.db.SelectContext(ctx, &media, "SELECT * FROM lesson_media WHERE lesson_id = $1", lessonID); err != nil {
+		return nil, fmt.Errorf("failed to get media for lesson: %w", err)
+	}
+
+	// Assign media to the lesson
+	lesson.Media = media
+
 	return lesson, nil
 }

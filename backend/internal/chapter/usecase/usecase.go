@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -59,75 +60,174 @@ func (u *chapterUC) GenerateChapterWithAI(ctx context.Context, prompt string, su
 		return nil, fmt.Errorf("failed to create chapter: %w", err)
 	}
 
+	// Create a wait group to wait for all goroutines to finish
+	var wg sync.WaitGroup
+
+	// Create a channel to collect errors from goroutines
+	errChan := make(chan error, len(chapter.Lessons))
+
+	// Create a semaphore to limit concurrent API calls to avoid rate limits
+	// OpenAI has a limit of 5 images/minute, so we'll keep it safe
+	const maxConcurrentImageRequests = 4
+	imageSemaphore := make(chan struct{}, maxConcurrentImageRequests)
+
+	// Create a mutex to protect shared resources
+	var mu sync.Mutex
+
+	// Track image generation count to avoid rate limits
+	imageCount := 0
+	const maxImagesPerMinute = 4 // Keep below the limit of 5 to be safe
+
 	for _, lesson := range chapter.Lessons {
+		// Set the chapter ID and user ID for each lesson
 		lesson.ChapterID = createdChapter.ChapterID
 		lesson.CreatedBy = userID
 
-		err = u.chapterRepo.CreateLesson(ctx, lesson)
-		if err != nil {
-			u.logger.Errorf("failed to create lesson: %v", err)
-			continue
-		}
+		// Create a copy of the lesson for the goroutine to avoid race conditions
+		lessonCopy := lesson
 
-		// Generate both memes and illustrations if OpenAI API key is available
-		if u.cfg.OpenAI.APIKey != "" {
-			// Generate meme
-			memes, err := u.aiService.GenerateMemes(ctx, lesson.Title, 1)
+		// Add to wait group before starting goroutine
+		wg.Add(1)
+
+		// Process each lesson in a separate goroutine
+		go func(lesson *models.Lesson) {
+			defer wg.Done()
+
+			// Create the lesson in the database
+			err := u.chapterRepo.CreateLesson(ctx, lesson)
 			if err != nil {
-				u.logger.Warnf("skipping meme generation for lesson due to error: %v", err)
-			} else {
-				for _, meme := range memes {
-					meme.LessonID = lesson.LessonID
-					if err := u.chapterRepo.CreateLessonMedia(ctx, meme); err != nil {
-						u.logger.Warnf("failed to save meme: %v", err)
+				u.logger.Errorf("failed to create lesson: %v", err)
+				errChan <- fmt.Errorf("failed to create lesson: %w", err)
+				return
+			}
+
+			// Only generate media if OpenAI API key is available
+			if u.cfg.OpenAI.APIKey != "" {
+				// Process meme generation
+				if shouldGenerateMeme(&mu, &imageCount, maxImagesPerMinute) {
+					// Acquire semaphore before making API call
+					imageSemaphore <- struct{}{}
+
+					// Generate meme (limited to 1)
+					memes, err := u.aiService.GenerateMemes(ctx, lesson.Title, 1, "openai")
+
+					// Release semaphore after API call
+					<-imageSemaphore
+
+					if err != nil {
+						u.logger.Warnf("skipping meme generation for lesson due to error: %v", err)
+					} else {
+						// Lock for updating shared resource
+						mu.Lock()
+						imageCount++
+						mu.Unlock()
+
+						for _, meme := range memes {
+							meme.LessonID = lesson.LessonID
+							if err := u.chapterRepo.CreateLessonMedia(ctx, meme); err != nil {
+								u.logger.Warnf("failed to save meme: %v", err)
+							}
+						}
+					}
+				}
+
+				// Process image generation from prompts
+				if len(lesson.ImagePrompts) > 0 && shouldGenerateImage(&mu, &imageCount, maxImagesPerMinute) {
+					// Only use the first prompt to avoid rate limits
+					prompt := lesson.ImagePrompts[0]
+
+					// Acquire semaphore before making API call
+					imageSemaphore <- struct{}{}
+
+					media, err := u.aiService.GenerateImageFromPrompt(ctx, prompt)
+
+					// Release semaphore after API call
+					<-imageSemaphore
+
+					if err != nil {
+						u.logger.Warnf("failed to generate illustration: %v", err)
+					} else {
+						// Lock for updating shared resource
+						mu.Lock()
+						imageCount++
+						mu.Unlock()
+
+						media.LessonID = lesson.LessonID
+						if err := u.chapterRepo.CreateLessonMedia(ctx, media); err != nil {
+							u.logger.Warnf("failed to save illustration: %v", err)
+						}
 					}
 				}
 			}
 
-			// Generate illustrations from prompts
-			for _, prompt := range lesson.ImagePrompts {
-				media, err := u.aiService.GenerateImageFromPrompt(ctx, prompt)
+			// Generate quiz for every third lesson
+			if lesson.Order%3 == 0 {
+				quiz, questions, err := u.aiService.GenerateQuizContent(ctx, lesson.Content)
 				if err != nil {
-					u.logger.Warnf("failed to generate illustration: %v", err)
-					continue
+					u.logger.Errorf("failed to generate quiz for lesson: %v", err)
+					return
 				}
-				media.LessonID = lesson.LessonID
-				if err := u.chapterRepo.CreateLessonMedia(ctx, media); err != nil {
-					u.logger.Warnf("failed to save illustration: %v", err)
-				}
-			}
-		}
 
-		if lesson.Order%3 == 0 {
-			quiz, questions, err := u.aiService.GenerateQuizContent(ctx, lesson.Content)
-			if err != nil {
-				u.logger.Errorf("failed to generate quiz for lesson: %v", err)
-				continue
-			}
-
-			quiz.LessonID = lesson.LessonID
-			err = u.chapterRepo.CreateQuiz(ctx, quiz)
-			if err != nil {
-				u.logger.Errorf("failed to create quiz: %v", err)
-				continue
-			}
-
-			for _, question := range questions {
-				question.QuizID = quiz.QuizID
-				err = u.chapterRepo.CreateQuestion(ctx, question)
+				quiz.LessonID = lesson.LessonID
+				err = u.chapterRepo.CreateQuiz(ctx, quiz)
 				if err != nil {
-					u.logger.Errorf("failed to create question: %v", err)
+					u.logger.Errorf("failed to create quiz: %v", err)
+					return
+				}
+
+				// Process questions sequentially as they depend on the quiz
+				for _, question := range questions {
+					question.QuizID = quiz.QuizID
+					err = u.chapterRepo.CreateQuestion(ctx, question)
+					if err != nil {
+						u.logger.Errorf("failed to create question: %v", err)
+					}
 				}
 			}
-		}
+		}(lessonCopy)
+	}
+
+	// Wait for all goroutines to finish
+	wg.Wait()
+
+	// Close the error channel
+	close(errChan)
+
+	// Check if there were any errors
+	var errs []error
+	for err := range errChan {
+		errs = append(errs, err)
+	}
+
+	// If there were errors, log them but continue
+	if len(errs) > 0 {
+		u.logger.Errorf("encountered %d errors while processing lessons", len(errs))
 	}
 
 	return u.GetChapterByID(ctx, createdChapter.ChapterID)
 }
 
-func (u *chapterUC) GenerateMemesForChapter(ctx context.Context, chapterID uuid.UUID, topic string) ([]*models.LessonMedia, error) {
+// Helper function to check if we should generate a meme
+// Uses mutex to safely access and update shared state
+func shouldGenerateMeme(mu *sync.Mutex, imageCount *int, maxImagesPerMinute int) bool {
+	mu.Lock()
+	defer mu.Unlock()
 
-	memes, err := u.aiService.GenerateMemes(ctx, topic, 3)
+	return *imageCount < maxImagesPerMinute
+}
+
+// Helper function to check if we should generate an image
+// Uses mutex to safely access and update shared state
+func shouldGenerateImage(mu *sync.Mutex, imageCount *int, maxImagesPerMinute int) bool {
+	mu.Lock()
+	defer mu.Unlock()
+
+	return *imageCount < maxImagesPerMinute
+}
+
+func (u *chapterUC) GenerateMemesForChapter(ctx context.Context, chapterID uuid.UUID, topic string) ([]*models.LessonMedia, error) {
+	// Always limit to 1 meme to avoid rate limits
+	memes, err := u.aiService.GenerateMemes(ctx, topic, 1, "openai")
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate memes: %v", err)
 	}

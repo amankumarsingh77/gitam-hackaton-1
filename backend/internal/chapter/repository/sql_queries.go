@@ -49,7 +49,7 @@ const (
 	createLessonMediaQuery = `
 		INSERT INTO lesson_media (lesson_id, media_type, url, description)
 		VALUES ($1, $2, $3, $4)
-		RETURNING *
+		RETURNING media_id
 	`
 
 	getLessonMediaByChapterQuery = `
@@ -100,16 +100,16 @@ const (
 	createQuestionResponseQuery = `
 		INSERT INTO user_question_responses (attempt_id, question_id, user_answer, is_correct)
 		VALUES ($1, $2, $3, $4)
-		RETURNING *
-	`
-
-	getLessonByIDQuery = `
-		SELECT * FROM lessons WHERE lesson_id = $1
+		RETURNING response_id
 	`
 
 	getUserCustomChaptersQuery = `
 		SELECT * FROM chapters 
 		WHERE created_by = $1 AND is_custom = true
 		ORDER BY created_at DESC
+	`
+
+	getLessonByIDQuery = `
+		SELECT * FROM lessons WHERE lesson_id = $1
 	`
 )
