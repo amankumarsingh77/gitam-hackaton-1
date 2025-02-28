@@ -8,18 +8,20 @@ import (
 
 // Lesson represents a learning unit with content and associated media
 type Lesson struct {
-	LessonID    uuid.UUID `json:"lesson_id" db:"lesson_id" validate:"omitempty"`
-	ChapterID   uuid.UUID `json:"chapter_id" db:"chapter_id" validate:"required"`
-	Title       string    `json:"title" db:"title" validate:"required,lte=100"`
-	Description string    `json:"description" db:"description" validate:"required,lte=500"`
-	Content     string    `json:"content" db:"content" validate:"required"`
-	Grade       int       `json:"grade" db:"grade" validate:"required,gte=1,lte=12"`
-	Subject     string    `json:"subject" db:"subject" validate:"required,lte=50"`
-	Order       int       `json:"order" db:"order" validate:"required"`
-	IsCustom    bool      `json:"is_custom" db:"is_custom"`
-	CreatedBy   uuid.UUID `json:"created_by" db:"created_by" validate:"required"`
-	CreatedAt   time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`
+	LessonID     uuid.UUID      `json:"lesson_id" db:"lesson_id" validate:"omitempty"`
+	ChapterID    uuid.UUID      `json:"chapter_id" db:"chapter_id" validate:"required"`
+	Title        string         `json:"title" db:"title" validate:"required,lte=100"`
+	Description  string         `json:"description" db:"description" validate:"required,lte=500"`
+	Content      string         `json:"content" db:"content" validate:"required"`
+	Grade        int            `json:"grade" db:"grade" validate:"required,gte=1,lte=12"`
+	Subject      string         `json:"subject" db:"subject" validate:"required,lte=50"`
+	Order        int            `json:"order" db:"order" validate:"required"`
+	IsCustom     bool           `json:"is_custom" db:"is_custom"`
+	CreatedBy    uuid.UUID      `json:"created_by" db:"created_by" validate:"required"`
+	CreatedAt    time.Time      `json:"created_at" db:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at" db:"updated_at"`
+	ImagePrompts []string       `json:"image_prompts,omitempty" db:"-"`
+	Media        []*LessonMedia `json:"media,omitempty" db:"-"`
 }
 
 // LessonMedia represents images and memes associated with a lesson

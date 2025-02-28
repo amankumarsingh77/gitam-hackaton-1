@@ -13,17 +13,14 @@ import (
 	"github.com/AleksK1NG/api-mc/internal/models"
 )
 
-// Auth Redis Repository
 type authRedisRepo struct {
 	redisClient *redis.Client
 }
 
-// Auth Redis Repository constructor
 func NewAuthRedisRepository(redisClient *redis.Client) auth.RedisRepository {
 	return &authRedisRepo{redisClient: redisClient}
 }
 
-// Get user by id from redis
 func (r *authRedisRepo) GetByIDCtx(ctx context.Context, key string) (*models.User, error) {
 	span, ctx := opentracing.StartSpanFromContext(ctx, "authRedisRepo.GetByIDCtx")
 	defer span.Finish()
@@ -39,7 +36,6 @@ func (r *authRedisRepo) GetByIDCtx(ctx context.Context, key string) (*models.Use
 	return user, nil
 }
 
-// Set user with expire time
 func (r *authRedisRepo) SetUserCtx(ctx context.Context, key string, seconds int, user *models.User) error {
 	span, ctx := opentracing.StartSpanFromContext(ctx, "authRedisRepo.SetUserCtx")
 	defer span.Finish()
@@ -54,7 +50,6 @@ func (r *authRedisRepo) SetUserCtx(ctx context.Context, key string, seconds int,
 	return nil
 }
 
-// Delete user by key
 func (r *authRedisRepo) DeleteUserCtx(ctx context.Context, key string) error {
 	span, ctx := opentracing.StartSpanFromContext(ctx, "authRedisRepo.DeleteUserCtx")
 	defer span.Finish()

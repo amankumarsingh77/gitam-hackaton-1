@@ -25,4 +25,18 @@ type UseCase interface {
 	// Custom Content
 	CreateCustomChapter(ctx context.Context, chapter *models.Chapter, userID uuid.UUID) (*models.Chapter, error)
 	GetUserCustomChapters(ctx context.Context, userID uuid.UUID) ([]*models.Chapter, error)
+	GetCustomLessonsByChapter(ctx context.Context, chapterID uuid.UUID) ([]*models.Lesson, error)
+	CreateCustomLesson(ctx context.Context, lesson *models.Lesson, userID uuid.UUID) (*models.Lesson, error)
+	GetLessonByID(ctx context.Context, lessonID uuid.UUID) (*models.Lesson, error)
+
+	// Quiz Management
+	GetQuizByID(ctx context.Context, quizID uuid.UUID) (*models.Quiz, []*models.Question, error)
+	GetQuizzesByChapterID(ctx context.Context, chapterID uuid.UUID) ([]*models.QuizWithQuestions, error)
+	SubmitQuizAnswers(ctx context.Context, userID uuid.UUID, quizID uuid.UUID, answers []*models.UserQuestionResponse) (*models.UserQuizAttempt, error)
+
+	// Quiz operations
+	CreateQuiz(ctx context.Context, quiz *models.Quiz) error
+	GetQuizByChapter(ctx context.Context, chapterID uuid.UUID) (*models.Quiz, error)
+	CreateQuestion(ctx context.Context, question *models.Question) error
+	GetQuestionsByQuizID(ctx context.Context, quizID uuid.UUID) ([]*models.Question, error)
 }

@@ -12,6 +12,9 @@ import (
 	echoSwagger "github.com/swaggo/echo-swagger"
 
 	// _ "github.com/AleksK1NG/api-mc/docs"
+	achievementHttp "github.com/AleksK1NG/api-mc/internal/achievement/delivery/http"
+	achievementRepository "github.com/AleksK1NG/api-mc/internal/achievement/repository"
+	achievementUseCase "github.com/AleksK1NG/api-mc/internal/achievement/usecase"
 	authHttp "github.com/AleksK1NG/api-mc/internal/auth/delivery/http"
 	authRepository "github.com/AleksK1NG/api-mc/internal/auth/repository"
 	authUseCase "github.com/AleksK1NG/api-mc/internal/auth/usecase"
@@ -19,6 +22,7 @@ import (
 	chapterRepository "github.com/AleksK1NG/api-mc/internal/chapter/repository"
 	chapterService "github.com/AleksK1NG/api-mc/internal/chapter/service"
 	chapterUseCase "github.com/AleksK1NG/api-mc/internal/chapter/usecase"
+	leaderboardHttp "github.com/AleksK1NG/api-mc/internal/leaderboard/delivery/http"
 	apiMiddlewares "github.com/AleksK1NG/api-mc/internal/middleware"
 	sessionRepository "github.com/AleksK1NG/api-mc/internal/session/repository"
 	"github.com/AleksK1NG/api-mc/internal/session/usecase"
@@ -43,6 +47,10 @@ func (s *Server) MapHandlers(e *echo.Echo) error {
 	sRepo := sessionRepository.NewSessionRepository(s.redisClient, s.cfg)
 	authRedisRepo := authRepository.NewAuthRedisRepository(s.redisClient)
 	chapterRepo := chapterRepository.NewChapterRepository(s.db)
+	achievementRepo := achievementRepository.NewAchievementRepository(s.db, s.logger)
+	userProgressRepo := achievementRepository.NewUserProgressRepository(s.db, s.logger)
+	lessonProgressRepo := achievementRepository.NewLessonProgressRepository(s.db, s.logger)
+	userQuizAttemptsRepo := achievementRepository.NewUserQuizAttemptsRepository(s.db, s.logger)
 
 	// Init AI service
 	aiService, err := chapterService.NewAIService(s.cfg, s.logger)
@@ -54,10 +62,18 @@ func (s *Server) MapHandlers(e *echo.Echo) error {
 	authUC := authUseCase.NewAuthUseCase(s.cfg, aRepo, authRedisRepo, s.logger)
 	sessUC := usecase.NewSessionUseCase(sRepo, s.cfg)
 	chapterUC := chapterUseCase.NewChapterUseCase(s.cfg, chapterRepo, aiService, s.logger)
+	achievementUC := achievementUseCase.NewAchievementUseCase(
+		achievementRepo,
+		userProgressRepo,
+		lessonProgressRepo,
+		userQuizAttemptsRepo,
+		s.logger,
+	)
 
 	// Init handlers
 	authHandlers := authHttp.NewAuthHandlers(s.cfg, authUC, sessUC, s.logger)
 	chapterHandlers := chapterHttp.NewChapterHandlers(s.cfg, chapterUC, s.logger)
+	achievementHandlers := achievementHttp.NewAchievementHandlers(achievementUC, s.logger)
 
 	mw := apiMiddlewares.NewMiddlewareManager(sessUC, authUC, s.cfg, []string{"*"}, s.logger)
 
@@ -99,10 +115,22 @@ func (s *Server) MapHandlers(e *echo.Echo) error {
 	health := v1.Group("/health")
 	authGroup := v1.Group("/auth")
 	chapterGroup := v1.Group("/chapters")
+	achievementGroup := v1.Group("/achievements")
+	leaderboardGroup := v1.Group("/leaderboard")
 
 	// Map routes
 	authHttp.MapAuthRoutes(authGroup, authHandlers, mw)
 	chapterHttp.MapChapterRoutes(chapterGroup, chapterHandlers, mw)
+	achievementHttp.MapAchievementRoutes(achievementGroup, achievementHandlers, mw, achievementUC, s.logger)
+
+	// Register achievement middleware for automatic achievement checking
+	achievementHttp.RegisterAchievementMiddleware(e, achievementUC, s.logger)
+
+	// Register leaderboard middleware for automatic leaderboard tracking
+	if s.leaderboardUC != nil {
+		leaderboardHttp.RegisterLeaderboardMiddleware(e, s.leaderboardUC, s.logger)
+		leaderboardHttp.MapLeaderboardRoutes(leaderboardGroup, s.leaderboardHandlers, mw, s.logger)
+	}
 
 	health.GET("", func(c echo.Context) error {
 		s.logger.Infof("Health check RequestID: %s", utils.GetRequestID(c))

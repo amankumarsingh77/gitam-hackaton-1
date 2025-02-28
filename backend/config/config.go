@@ -107,11 +107,14 @@ type Store struct {
 
 // AWS S3
 type AWS struct {
-	Endpoint       string
-	MinioAccessKey string
-	MinioSecretKey string
-	UseSSL         bool
-	MinioEndpoint  string
+	Endpoint      string
+	AccessKey     string
+	SecretKey     string
+	UseSSL        bool
+	MinioEndpoint string
+	BucketName    string
+	PublicURL     string
+	Region        string
 }
 
 // AWS S3

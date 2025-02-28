@@ -84,3 +84,9 @@ type QuestionList struct {
 	HasMore    bool        `json:"has_more"`
 	Questions  []*Question `json:"questions"`
 }
+
+// QuizWithQuestions extends Quiz to include its associated questions
+type QuizWithQuestions struct {
+	Quiz
+	Questions []*Question `json:"questions"`
+}

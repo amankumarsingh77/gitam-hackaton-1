@@ -19,4 +19,13 @@ type Handlers interface {
 	// Custom Content
 	CreateCustomChapter() echo.HandlerFunc
 	GetUserCustomChapters() echo.HandlerFunc
+	GetCustomLessonsByChapter() echo.HandlerFunc
+	CreateCustomLesson() echo.HandlerFunc
+	GetLessonByID() echo.HandlerFunc
+
+	// Quiz Management
+	GetQuizByID() echo.HandlerFunc
+	GetQuizzesByChapter() echo.HandlerFunc
+	SubmitQuizAnswers() echo.HandlerFunc
+	GetQuestionsByQuizID() echo.HandlerFunc
 }
