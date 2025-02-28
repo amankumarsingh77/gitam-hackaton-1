@@ -14,13 +14,11 @@ import (
 	"github.com/AleksK1NG/api-mc/pkg/utils"
 )
 
-// Achievement handlers
 type achievementHandlers struct {
 	achievementUC achievement.UseCase
 	logger        logger.Logger
 }
 
-// Achievement handlers constructor
 func NewAchievementHandlers(achievementUC achievement.UseCase, logger logger.Logger) achievement.Handlers {
 	return &achievementHandlers{
 		achievementUC: achievementUC,
@@ -28,7 +26,6 @@ func NewAchievementHandlers(achievementUC achievement.UseCase, logger logger.Log
 	}
 }
 
-// Create achievement handler
 func (h *achievementHandlers) CreateAchievement() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		achievement := &models.Achievement{}
@@ -49,7 +46,6 @@ func (h *achievementHandlers) CreateAchievement() echo.HandlerFunc {
 	}
 }
 
-// Get achievement by id handler
 func (h *achievementHandlers) GetAchievementByID() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		idParam := c.Param("id")
@@ -67,7 +63,6 @@ func (h *achievementHandlers) GetAchievementByID() echo.HandlerFunc {
 	}
 }
 
-// Get all achievements handler
 func (h *achievementHandlers) GetAllAchievements() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		achievements, err := h.achievementUC.GetAllAchievements(c.Request().Context())
@@ -79,7 +74,6 @@ func (h *achievementHandlers) GetAllAchievements() echo.HandlerFunc {
 	}
 }
 
-// Update achievement handler
 func (h *achievementHandlers) UpdateAchievement() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		idParam := c.Param("id")
@@ -107,7 +101,6 @@ func (h *achievementHandlers) UpdateAchievement() echo.HandlerFunc {
 	}
 }
 
-// Delete achievement handler
 func (h *achievementHandlers) DeleteAchievement() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		idParam := c.Param("id")
@@ -124,7 +117,6 @@ func (h *achievementHandlers) DeleteAchievement() echo.HandlerFunc {
 	}
 }
 
-// Get user achievements handler
 func (h *achievementHandlers) GetUserAchievements() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		userID, err := utils.GetUserIDFromContext(c)
@@ -132,7 +124,6 @@ func (h *achievementHandlers) GetUserAchievements() echo.HandlerFunc {
 			return httpErrors.NewUnauthorizedError(errors.Wrap(err, "achievementHandlers.GetUserAchievements.GetUserIDFromContext"))
 		}
 
-		// Automatically check for new achievements when user views their achievements
 		go func() {
 			if err := h.achievementUC.CheckAndAwardAchievements(c.Request().Context(), userID); err != nil {
 				h.logger.Errorf("Error checking and awarding achievements: %v", err)
@@ -148,11 +139,8 @@ func (h *achievementHandlers) GetUserAchievements() echo.HandlerFunc {
 	}
 }
 
-// Award achievement to user handler
 func (h *achievementHandlers) AwardAchievementToUser() echo.HandlerFunc {
 	return func(c echo.Context) error {
-		// This endpoint would typically be used by admins or internal services
-		// to manually award achievements to users
 
 		type AwardRequest struct {
 			UserID        uuid.UUID `json:"user_id" validate:"required"`
@@ -176,21 +164,18 @@ func (h *achievementHandlers) AwardAchievementToUser() echo.HandlerFunc {
 	}
 }
 
-// CheckUserAchievements is a middleware that can be used to check for achievements
-// after certain user actions like completing a lesson or quiz
 func CheckUserAchievements(achievementUC achievement.UseCase, logger logger.Logger) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
-			// Process the request first
+
 			if err := next(c); err != nil {
 				return err
 			}
 
-			// After the request is processed, check for achievements asynchronously
 			userID, err := utils.GetUserIDFromContext(c)
 			if err != nil {
 				logger.Errorf("Error getting user ID from context: %v", err)
-				return nil // Don't fail the request if we can't check achievements
+				return nil
 			}
 
 			go func() {

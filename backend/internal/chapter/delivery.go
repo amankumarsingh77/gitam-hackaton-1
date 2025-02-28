@@ -25,5 +25,7 @@ type Handlers interface {
 
 	// Quiz Management
 	GetQuizByID() echo.HandlerFunc
+	GetQuizzesByChapter() echo.HandlerFunc
 	SubmitQuizAnswers() echo.HandlerFunc
+	GetQuestionsByQuizID() echo.HandlerFunc
 }

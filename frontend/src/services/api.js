@@ -96,7 +96,16 @@ export const chaptersAPI = {
     API.get(`/chapters/quizzes/${quizId}`),
     
   submitQuizAnswers: (quizId, answers) =>
-    API.post('/chapters/quizzes/submit', { quiz_id: quizId, answers }),
+    API.post('/chapters/quizzes/submit', { 
+      quiz_id: quizId, 
+      answers: answers 
+    }),
+    
+  getQuizzesByChapter: (chapterId) =>
+    API.get(`/chapters/${chapterId}/quizzes`),
+    
+  getQuizQuestions: (quizId) =>
+    API.get(`/chapters/quizzes/${quizId}/questions`),
 };
 
 

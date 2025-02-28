@@ -36,7 +36,7 @@ function Chatbot({ onClose }) {
         >
             {/* Header */}
             <div className="bg-primary text-white p-4 flex justify-between items-center">
-                <h3 className="font-heading font-semibold">MemeLearn Assistant</h3>
+                <h3 className="font-heading font-semibold">Bit Buddy Assistant</h3>
                 <button
                     onClick={onClose}
                     className="text-white hover:text-gray-200"
@@ -50,7 +50,7 @@ function Chatbot({ onClose }) {
                 {chatHistory.length === 0 ? (
                     <div className="text-center text-gray-500 mt-4">
                         <p>How can I help you learn today?</p>
-                        <p className="text-sm mt-2">Try asking about programming concepts or how to use MemeLearn.</p>
+                        <p className="text-sm mt-2">Try asking about programming concepts or how to use Bit Buddy.</p>
                     </div>
                 ) : (
                     <div className="space-y-4">
@@ -58,8 +58,8 @@ function Chatbot({ onClose }) {
                             <div
                                 key={index}
                                 className={`${chat.role === 'user'
-                                        ? 'bg-gray-100 ml-8'
-                                        : 'bg-primary bg-opacity-10 mr-8'
+                                    ? 'bg-gray-100 ml-8'
+                                    : 'bg-primary bg-opacity-10 mr-8'
                                     } p-3 rounded-lg`}
                             >
                                 <ReactMarkdown className="prose prose-sm">
@@ -95,8 +95,8 @@ function Chatbot({ onClose }) {
                         type="submit"
                         disabled={isLoadingChat || !message.trim()}
                         className={`ml-2 btn ${isLoadingChat || !message.trim()
-                                ? 'bg-gray-300 cursor-not-allowed'
-                                : 'btn-primary'
+                            ? 'bg-gray-300 cursor-not-allowed'
+                            : 'btn-primary'
                             }`}
                     >
                         Send

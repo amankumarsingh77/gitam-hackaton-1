@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/opentracing/opentracing-go"
 
 	"github.com/AleksK1NG/api-mc/config"
 	"github.com/AleksK1NG/api-mc/internal/chapter"
@@ -321,6 +322,25 @@ func (u *chapterUC) GetLessonByID(ctx context.Context, lessonID uuid.UUID) (*mod
 	return lesson, nil
 }
 
+func (u *chapterUC) GetQuizzesByChapterID(ctx context.Context, chapterID uuid.UUID) ([]*models.QuizWithQuestions, error) {
+	span, ctx := opentracing.StartSpanFromContext(ctx, "chapterUC.GetQuizzesByChapterID")
+	defer span.Finish()
+
+	// Check if chapter exists
+	_, err := u.chapterRepo.GetChapterByID(ctx, chapterID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get quizzes with questions
+	quizzes, err := u.chapterRepo.GetQuizzesByChapterID(ctx, chapterID)
+	if err != nil {
+		return nil, err
+	}
+
+	return quizzes, nil
+}
+
 func (u *chapterUC) GetQuizByID(ctx context.Context, quizID uuid.UUID) (*models.Quiz, []*models.Question, error) {
 	// Get the quiz
 	quiz, err := u.chapterRepo.GetQuizByID(ctx, quizID)
@@ -410,4 +430,68 @@ func (u *chapterUC) SubmitQuizAnswers(ctx context.Context, userID uuid.UUID, qui
 	}
 
 	return savedAttempt, nil
+}
+
+// CreateQuestion implements the CreateQuestion method required by the chapter.UseCase interface
+func (u *chapterUC) CreateQuestion(ctx context.Context, question *models.Question) error {
+	span, ctx := opentracing.StartSpanFromContext(ctx, "chapterUC.CreateQuestion")
+	defer span.Finish()
+
+	// Validate the question
+	if question.QuizID == uuid.Nil {
+		return fmt.Errorf("quiz_id is required")
+	}
+
+	// Check if the quiz exists
+	_, err := u.chapterRepo.GetQuizByID(ctx, question.QuizID)
+	if err != nil {
+		return fmt.Errorf("failed to get quiz: %w", err)
+	}
+
+	// Create the question
+	return u.chapterRepo.CreateQuestion(ctx, question)
+}
+
+// CreateQuiz implements the CreateQuiz method required by the chapter.UseCase interface
+func (u *chapterUC) CreateQuiz(ctx context.Context, quiz *models.Quiz) error {
+	span, ctx := opentracing.StartSpanFromContext(ctx, "chapterUC.CreateQuiz")
+	defer span.Finish()
+
+	// Validate the quiz
+	if quiz.LessonID == uuid.Nil {
+		return fmt.Errorf("lesson_id is required")
+	}
+
+	// Create the quiz
+	return u.chapterRepo.CreateQuiz(ctx, quiz)
+}
+
+// GetQuizByChapter implements the GetQuizByChapter method required by the chapter.UseCase interface
+func (u *chapterUC) GetQuizByChapter(ctx context.Context, chapterID uuid.UUID) (*models.Quiz, error) {
+	span, ctx := opentracing.StartSpanFromContext(ctx, "chapterUC.GetQuizByChapter")
+	defer span.Finish()
+
+	// Check if chapter exists
+	_, err := u.chapterRepo.GetChapterByID(ctx, chapterID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get chapter: %w", err)
+	}
+
+	// Get quiz for the chapter
+	return u.chapterRepo.GetQuizByChapter(ctx, chapterID)
+}
+
+// GetQuestionsByQuizID implements the GetQuestionsByQuizID method required by the chapter.UseCase interface
+func (u *chapterUC) GetQuestionsByQuizID(ctx context.Context, quizID uuid.UUID) ([]*models.Question, error) {
+	span, ctx := opentracing.StartSpanFromContext(ctx, "chapterUC.GetQuestionsByQuizID")
+	defer span.Finish()
+
+	// Check if quiz exists
+	_, err := u.chapterRepo.GetQuizByID(ctx, quizID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get quiz: %w", err)
+	}
+
+	// Get questions for the quiz
+	return u.chapterRepo.GetQuestionsByQuizID(ctx, quizID)
 }

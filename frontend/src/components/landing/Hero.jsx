@@ -39,7 +39,7 @@ const Hero = () => {
                             Learn Anything with <span className="bg-gradient-to-r from-indigo-600 to-violet-500 text-transparent bg-clip-text">Memes</span>
                         </h1>
                         <p className="text-lg md:text-xl text-slate-600 mb-8 leading-relaxed">
-                            MemeLearn makes learning fun and engaging through memes, interactive lessons, and gamified quizzes — for both programming and school subjects.
+                            Bit Buddy makes learning fun and engaging through memes, interactive lessons, and gamified quizzes — for both programming and school subjects.
                         </p>
                         <div className="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4">
                             <Link

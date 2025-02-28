@@ -10,6 +10,7 @@ import LessonHeader from '../components/lesson/LessonHeader';
 import LessonOverview from '../components/lesson/LessonOverview';
 import LessonContent from '../components/lesson/LessonContent';
 import LessonSummary from '../components/lesson/LessonSummary';
+import LessonQuiz from '../components/lesson/LessonQuiz';
 import ProgressBar from '../components/lesson/ProgressBar';
 import LoadingSpinner from '../components/common/LoadingSpinner';
 import ErrorMessage from '../components/common/ErrorMessage';
@@ -17,6 +18,7 @@ import ErrorMessage from '../components/common/ErrorMessage';
 // Interactive elements for the lesson
 function InteractiveElement({ type, content, onComplete }) {
     const [isCompleted, setIsCompleted] = useState(false);
+    const dispatch = useDispatch();
 
     const handleComplete = () => {
         setIsCompleted(true);
@@ -24,39 +26,7 @@ function InteractiveElement({ type, content, onComplete }) {
     };
 
     if (type === 'quiz') {
-        return (
-            <div className="bg-slate-50 p-6 rounded-lg border border-slate-200 my-6">
-                <h3 className="font-medium text-lg mb-4 text-slate-800">Quick Check</h3>
-                <p className="mb-4 text-slate-700">{content.question}</p>
-                <div className="space-y-2">
-                    {content.options.map((option, index) => (
-                        <button
-                            key={index}
-                            onClick={() => {
-                                if (index === content.correctIndex) {
-                                    handleComplete();
-                                }
-                            }}
-                            className={`w-full p-3 text-left rounded border transition-all ${isCompleted && index === content.correctIndex
-                                ? 'border-green-500 bg-green-50 text-green-700'
-                                : 'border-slate-200 hover:border-slate-300 text-slate-700'
-                                }`}
-                            disabled={isCompleted}
-                        >
-                            {option}
-                            {isCompleted && index === content.correctIndex && (
-                                <span className="float-right">✓</span>
-                            )}
-                        </button>
-                    ))}
-                </div>
-                {isCompleted && (
-                    <div className="mt-4 text-green-600">
-                        Great job! You got it right.
-                    </div>
-                )}
-            </div>
-        );
+        return <LessonQuiz quiz={content} onComplete={handleComplete} />;
     }
 
     if (type === 'codeExample') {
@@ -76,8 +46,65 @@ function InteractiveElement({ type, content, onComplete }) {
 }
 
 // Format lesson content with emojis and styling
-function FormattedContent({ content }) {
+function FormattedContent({ content, onQuizComplete }) {
+    const [completedQuizzes, setCompletedQuizzes] = useState([]);
+
+    useEffect(() => {
+        // Check if all quizzes are completed
+        const quizzes = extractQuizzes(content);
+        if (quizzes.length > 0 && completedQuizzes.length === quizzes.length) {
+            // All quizzes completed
+            if (onQuizComplete) {
+                onQuizComplete();
+            }
+        }
+    }, [completedQuizzes, content, onQuizComplete]);
+
     if (!content) return null;
+
+    // Extract quiz data from content
+    const extractQuizzes = (content) => {
+        const quizzes = [];
+        const quizRegex = /🎮[\s\S]*?Quiz:[\s\S]*?Question: (.*?)[\s\S]*?Options:[\s\S]*?((?:- .*?\n)+)[\s\S]*?Correct Answer: (.*?)[\s\S]*?Explanation: (.*?)(?=\n\n|$)/g;
+
+        let match;
+        while ((match = quizRegex.exec(content)) !== null) {
+            const question = match[1].trim();
+            const optionsText = match[2];
+            const correctAnswer = match[3].trim();
+            const explanation = match[4].trim();
+
+            // Parse options
+            const options = optionsText.split('\n')
+                .filter(line => line.trim().startsWith('- '))
+                .map(line => line.trim().substring(2).trim());
+
+            // Find correct index
+            const correctIndex = options.findIndex(option =>
+                option.toLowerCase() === correctAnswer.toLowerCase());
+
+            if (correctIndex !== -1) {
+                quizzes.push({
+                    question,
+                    options,
+                    correctIndex,
+                    explanation
+                });
+            }
+        }
+
+        return quizzes;
+    };
+
+    // Extract quizzes from content
+    const quizzes = extractQuizzes(content);
+
+    // Handle quiz completion
+    const handleQuizComplete = (index) => {
+        if (!completedQuizzes.includes(index)) {
+            setCompletedQuizzes(prev => [...prev, index]);
+        }
+    };
 
     // Process content to handle emojis, headers, and other formatting
     const processedContent = content
@@ -138,11 +165,24 @@ function FormattedContent({ content }) {
 
         // Add special styling for event horizon and other key terms
         .replace(/📍 Event Horizon:/g, '<div id="event-horizon" class="mb-6"><h4 class="font-medium text-lg mb-3 text-slate-800 flex items-center"><span class="text-red-500 mr-2">●</span>Event Horizon</h4>')
-        .replace(/black hole/gi, '<span class="font-medium text-slate-900">black hole</span>');
+        .replace(/black hole/gi, '<span class="font-medium text-slate-900">black hole</span>')
+
+        // Remove quiz content since we'll render it separately
+        .replace(/Quiz:[\s\S]*?Question: .*?[\s\S]*?Options:[\s\S]*?(?:- .*?\n)+[\s\S]*?Correct Answer: .*?[\s\S]*?Explanation: .*?(?=\n\n|$)/g, '');
 
     return (
         <div className="prose prose-lg max-w-none text-slate-700">
             <p className="mb-4 text-slate-700 leading-relaxed" dangerouslySetInnerHTML={{ __html: processedContent }} />
+
+            {/* Render quizzes */}
+            {quizzes.map((quiz, index) => (
+                <InteractiveElement
+                    key={`quiz-${index}`}
+                    type="quiz"
+                    content={quiz}
+                    onComplete={() => handleQuizComplete(index)}
+                />
+            ))}
         </div>
     );
 }
@@ -391,6 +431,15 @@ function LessonView() {
                         contentRef={contentRef}
                         onPrevious={handlePrevStep}
                         onContinue={handleNextStep}
+                        onQuizComplete={() => {
+                            // Mark lesson as partially completed when quizzes are done
+                            if (!isCompleted) {
+                                dispatch(updateChapterProgress({
+                                    chapterId: chapter.id || chapter.chapter_id,
+                                    progress: 50 // Partial progress
+                                }));
+                            }
+                        }}
                     />
                 );
             case 3: // Summary

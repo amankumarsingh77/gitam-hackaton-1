@@ -55,7 +55,7 @@ function MainLayout() {
                                 className="flex-shrink-0 flex items-center"
                             >
                                 <span className="font-heading font-bold text-2xl bg-gradient-to-r from-primary to-accent text-transparent bg-clip-text">
-                                    MemeLearn
+                                    Bit Buddy
                                 </span>
                             </Link>
 

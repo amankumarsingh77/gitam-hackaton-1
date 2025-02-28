@@ -71,6 +71,13 @@ const (
 		LIMIT 1
 	`
 
+	getQuizzesByChapterIDQuery = `
+		SELECT q.* FROM quizzes q
+		JOIN lessons l ON l.lesson_id = q.lesson_id
+		WHERE l.chapter_id = $1
+		ORDER BY q.created_at ASC
+	`
+
 	getQuizByIDQuery = `
 		SELECT * FROM quizzes WHERE quiz_id = $1
 	`

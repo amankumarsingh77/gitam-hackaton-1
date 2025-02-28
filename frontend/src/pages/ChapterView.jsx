@@ -6,6 +6,7 @@ import { setCurrentChapter, fetchChapterById, generateMemes, generateQuiz, fetch
 import { completeLesson } from '../store/slices/userSlice';
 import { chaptersAPI } from '../services/api';
 import QuizProgress from '../components/common/QuizProgress';
+import ChapterQuizzes from '../components/quiz/ChapterQuizzes';
 
 // Helper function to get subject gradient
 const getSubjectGradient = (subject) => {
@@ -500,6 +501,15 @@ function ChapterView() {
                         </div>
                     </div>
                 )}
+            </motion.div>
+
+            {/* Chapter Quizzes Section */}
+            <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5, delay: 0.2 }}
+            >
+                <ChapterQuizzes chapterId={actualChapterId} />
             </motion.div>
 
             <div className="mb-6 flex justify-between items-center">

@@ -486,6 +486,13 @@ curl -X POST http://localhost:8000/api/v1/achievements/admin/award \
 
 ## Quiz Management Routes
 
+### Get All Quizzes for a Chapter
+```bash
+curl -X GET http://localhost:8000/api/v1/chapters/{chapter_id}/quizzes \
+  -H "Authorization: Bearer {token}" \
+  -H "Origin: http://localhost:8000"
+```
+
 ### Get Quiz by ID
 ```bash
 curl -X GET http://localhost:8000/api/v1/chapters/quizzes/{quiz_id} \

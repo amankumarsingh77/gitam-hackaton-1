@@ -8,6 +8,7 @@ import { checkAuthStatus } from './store/slices/authSlice';
 // Components and Layouts
 import MainLayout from './components/layout/MainLayout';
 import PrivateRoute from './components/auth/PrivateRoute';
+import { QuizProvider } from './context/QuizContext';
 
 // Pages
 import Landing from './pages/Landing';
@@ -17,6 +18,7 @@ import Dashboard from './pages/Dashboard';
 import ChapterView from './pages/ChapterView';
 import LessonView from './pages/LessonView';
 import Quiz from './pages/Quiz';
+import QuizView from './pages/QuizView';
 import Profile from './pages/Profile';
 import Achievements from './pages/Achievements';
 import Leaderboard from './pages/Leaderboard';
@@ -49,7 +51,12 @@ function App() {
                 <Route path="/dashboard" element={<Dashboard />} />
                 <Route path="/chapters/:chapterId" element={<ChapterView />} />
                 <Route path="/chapters/:chapterId/lessons/:lessonId" element={<LessonView />} />
-                <Route path="/chapters/:chapterId/quiz" element={<Quiz />} />
+                <Route path="/chapters/:chapterId/quiz" element={
+                  <QuizProvider>
+                    <Quiz />
+                  </QuizProvider>
+                } />
+                <Route path="/chapters/:chapterId/quizzes/:quizId" element={<QuizView />} />
                 <Route path="/profile" element={<Profile />} />
                 <Route path="/achievements" element={<Achievements />} />
                 <Route path="/leaderboard" element={<Leaderboard />} />

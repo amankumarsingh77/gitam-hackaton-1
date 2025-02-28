@@ -441,13 +441,51 @@ func (h *chapterHandlers) GetQuizByID() echo.HandlerFunc {
 		quiz, questions, err := h.chapterUC.GetQuizByID(ctx, quizID)
 		if err != nil {
 			h.logger.Errorf("failed to get quiz: %v", err)
-			return c.JSON(http.StatusInternalServerError, response.Error("failed to get quiz"))
+			return c.JSON(http.StatusInternalServerError, response.Error("failed to get quiz "+err.Error()))
 		}
 
 		// Return the quiz and questions
 		return c.JSON(http.StatusOK, response.Success(map[string]interface{}{
 			"quiz":      quiz,
 			"questions": questions,
+		}))
+	}
+}
+
+// GetQuizzesByChapter godoc
+// @Summary Get all quizzes for a chapter
+// @Description Get all quizzes associated with a specific chapter
+// @Tags Quiz Management
+// @Accept json
+// @Produce json
+// @Param id path string true "Chapter ID"
+// @Success 200 {array} models.Quiz
+// @Router /chapters/{id}/quizzes [get]
+func (h *chapterHandlers) GetQuizzesByChapter() echo.HandlerFunc {
+	return func(c echo.Context) error {
+		ctx := c.Request().Context()
+
+		// Parse chapter ID from path parameter
+		chapterIDStr := c.Param("id")
+		if chapterIDStr == "" {
+			return c.JSON(http.StatusBadRequest, response.Error("chapter_id is required"))
+		}
+
+		chapterID, err := uuid.Parse(chapterIDStr)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, response.Error("invalid chapter_id format"))
+		}
+
+		// Get all quizzes for the chapter
+		quizzes, err := h.chapterUC.GetQuizzesByChapterID(ctx, chapterID)
+		if err != nil {
+			h.logger.Errorf("failed to get quizzes for chapter: %v", err)
+			return c.JSON(http.StatusInternalServerError, response.Error("failed to get quizzes "+err.Error()))
+		}
+
+		// Return the quizzes
+		return c.JSON(http.StatusOK, response.Success(map[string]interface{}{
+			"quizzes": quizzes,
 		}))
 	}
 }
@@ -518,6 +556,36 @@ func (h *chapterHandlers) SubmitQuizAnswers() echo.HandlerFunc {
 		return c.JSON(http.StatusOK, response.Success(map[string]interface{}{
 			"attempt": attempt,
 			"score":   attempt.Score,
+		}))
+	}
+}
+
+// GetQuestionsByQuizID handles the request to get all questions for a specific quiz
+func (h *chapterHandlers) GetQuestionsByQuizID() echo.HandlerFunc {
+	return func(c echo.Context) error {
+		ctx := c.Request().Context()
+
+		// Parse quiz ID from path parameter
+		quizIDStr := c.Param("quiz_id")
+		if quizIDStr == "" {
+			return c.JSON(http.StatusBadRequest, response.Error("quiz_id is required"))
+		}
+
+		quizID, err := uuid.Parse(quizIDStr)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, response.Error("invalid quiz_id format"))
+		}
+
+		// Get questions for the quiz
+		questions, err := h.chapterUC.GetQuestionsByQuizID(ctx, quizID)
+		if err != nil {
+			h.logger.Errorf("failed to get questions for quiz: %v", err)
+			return c.JSON(http.StatusInternalServerError, response.Error("failed to get questions for quiz: "+err.Error()))
+		}
+
+		// Return the questions
+		return c.JSON(http.StatusOK, response.Success(map[string]interface{}{
+			"questions": questions,
 		}))
 	}
 }

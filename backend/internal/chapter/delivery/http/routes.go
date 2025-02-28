@@ -39,6 +39,8 @@ func MapChapterRoutes(chapterGroup *echo.Group, h chapter.Handlers, mw *middlewa
 
 		// Quiz management
 		protected.GET("/quizzes/:quiz_id", h.GetQuizByID())
+		protected.GET("/:id/quizzes", h.GetQuizzesByChapter())
 		protected.POST("/quizzes/submit", h.SubmitQuizAnswers())
+		protected.GET("/quizzes/:quiz_id/questions", h.GetQuestionsByQuizID())
 	}
 }

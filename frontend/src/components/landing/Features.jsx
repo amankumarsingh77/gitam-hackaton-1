@@ -7,7 +7,7 @@ const Features = () => {
                 <div className="text-center mb-16">
                     <span className="inline-block px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-sm font-medium mb-4">Features</span>
                     <h2 className="text-3xl md:text-4xl font-heading font-bold text-slate-900 mb-4">
-                        Why Learn with MemeLearn?
+                        Why Learn with Bit Buddy?
                     </h2>
                     <p className="text-lg text-slate-600 max-w-3xl mx-auto leading-relaxed">
                         Our platform offers a balanced approach to learning both programming and academic subjects through engaging content.

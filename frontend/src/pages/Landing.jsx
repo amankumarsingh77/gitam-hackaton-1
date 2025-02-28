@@ -21,7 +21,7 @@ function Landing() {
                     <div className="flex justify-between items-center py-5">
                         <div className="flex items-center">
                             <span className="font-heading font-bold text-2xl bg-gradient-to-r from-indigo-600 to-violet-500 text-transparent bg-clip-text">
-                                MemeLearn
+                                Bit Buddy
                             </span>
                         </div>
                         <div className="flex items-center space-x-6">
@@ -110,7 +110,7 @@ function Landing() {
                         </div>
                     </div>
                     <div className="mt-12 pt-8 border-t border-slate-800 text-center">
-                        <p>&copy; {new Date().getFullYear()} MemeLearn. All rights reserved.</p>
+                        <p>&copy; {new Date().getFullYear()} Bit Buddy. All rights reserved.</p>
                     </div>
                 </div>
             </footer>

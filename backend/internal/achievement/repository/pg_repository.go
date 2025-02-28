@@ -14,13 +14,11 @@ import (
 	"github.com/AleksK1NG/api-mc/pkg/logger"
 )
 
-// Achievement Repository
 type achievementRepo struct {
 	db     *sqlx.DB
 	logger logger.Logger
 }
 
-// Achievement Repository constructor
 func NewAchievementRepository(db *sqlx.DB, logger logger.Logger) achievement.Repository {
 	return &achievementRepo{
 		db:     db,
@@ -28,7 +26,6 @@ func NewAchievementRepository(db *sqlx.DB, logger logger.Logger) achievement.Rep
 	}
 }
 
-// Create new achievement
 func (r *achievementRepo) CreateAchievement(ctx context.Context, achievement *models.Achievement) (*models.Achievement, error) {
 	achievement.AchievementID = uuid.New()
 	achievement.CreatedAt = time.Now()
@@ -50,7 +47,6 @@ func (r *achievementRepo) CreateAchievement(ctx context.Context, achievement *mo
 	return achievement, nil
 }
 
-// Get achievement by id
 func (r *achievementRepo) GetAchievementByID(ctx context.Context, achievementID uuid.UUID) (*models.Achievement, error) {
 	achievement := &models.Achievement{}
 	if err := r.db.GetContext(ctx, achievement, getAchievementByIDQuery, achievementID); err != nil {
@@ -59,7 +55,6 @@ func (r *achievementRepo) GetAchievementByID(ctx context.Context, achievementID 
 	return achievement, nil
 }
 
-// Get all achievements
 func (r *achievementRepo) GetAllAchievements(ctx context.Context) ([]*models.Achievement, error) {
 	achievements := make([]*models.Achievement, 0)
 	if err := r.db.SelectContext(ctx, &achievements, getAllAchievementsQuery); err != nil {
@@ -68,7 +63,6 @@ func (r *achievementRepo) GetAllAchievements(ctx context.Context) ([]*models.Ach
 	return achievements, nil
 }
 
-// Update achievement
 func (r *achievementRepo) UpdateAchievement(ctx context.Context, achievement *models.Achievement) (*models.Achievement, error) {
 	if err := r.db.GetContext(
 		ctx,
@@ -86,7 +80,6 @@ func (r *achievementRepo) UpdateAchievement(ctx context.Context, achievement *mo
 	return achievement, nil
 }
 
-// Delete achievement
 func (r *achievementRepo) DeleteAchievement(ctx context.Context, achievementID uuid.UUID) error {
 	result, err := r.db.ExecContext(ctx, deleteAchievementQuery, achievementID)
 	if err != nil {
@@ -104,7 +97,6 @@ func (r *achievementRepo) DeleteAchievement(ctx context.Context, achievementID u
 	return nil
 }
 
-// Get user achievements
 func (r *achievementRepo) GetUserAchievements(ctx context.Context, userID uuid.UUID) ([]*models.Achievement, error) {
 	achievements := make([]*models.Achievement, 0)
 	if err := r.db.SelectContext(ctx, &achievements, getUserAchievementsQuery, userID); err != nil {
@@ -113,7 +105,6 @@ func (r *achievementRepo) GetUserAchievements(ctx context.Context, userID uuid.U
 	return achievements, nil
 }
 
-// Award achievement to user
 func (r *achievementRepo) AwardAchievementToUser(ctx context.Context, userAchievement *models.UserAchievement) error {
 	userAchievement.UserAchievementID = uuid.New()
 	userAchievement.EarnedAt = time.Now()
@@ -135,7 +126,6 @@ func (r *achievementRepo) AwardAchievementToUser(ctx context.Context, userAchiev
 	return nil
 }
 
-// Check if user has achievement
 func (r *achievementRepo) CheckUserHasAchievement(ctx context.Context, userID uuid.UUID, achievementID uuid.UUID) (bool, error) {
 	var exists bool
 	err := r.db.QueryRowContext(ctx, checkUserHasAchievementQuery, userID, achievementID).Scan(&exists)
@@ -145,13 +135,11 @@ func (r *achievementRepo) CheckUserHasAchievement(ctx context.Context, userID uu
 	return exists, nil
 }
 
-// User Progress Repository
 type userProgressRepo struct {
 	db     *sqlx.DB
 	logger logger.Logger
 }
 
-// User Progress Repository constructor
 func NewUserProgressRepository(db *sqlx.DB, logger logger.Logger) achievement.UserProgressRepository {
 	return &userProgressRepo{
 		db:     db,
@@ -159,7 +147,6 @@ func NewUserProgressRepository(db *sqlx.DB, logger logger.Logger) achievement.Us
 	}
 }
 
-// Get user streak
 func (r *userProgressRepo) GetUserStreak(ctx context.Context, userID uuid.UUID) (int, error) {
 	var streak int
 	err := r.db.QueryRowContext(ctx, getUserStreakQuery, userID).Scan(&streak)
@@ -172,7 +159,6 @@ func (r *userProgressRepo) GetUserStreak(ctx context.Context, userID uuid.UUID) 
 	return streak, nil
 }
 
-// Get user subject progress
 func (r *userProgressRepo) GetUserSubjectProgress(ctx context.Context, userID uuid.UUID) ([]*models.UserProgress, error) {
 	progress := make([]*models.UserProgress, 0)
 	if err := r.db.SelectContext(ctx, &progress, getUserSubjectProgressQuery, userID); err != nil {
@@ -181,7 +167,6 @@ func (r *userProgressRepo) GetUserSubjectProgress(ctx context.Context, userID uu
 	return progress, nil
 }
 
-// Get user XP
 func (r *userProgressRepo) GetUserXP(ctx context.Context, userID uuid.UUID) (int, error) {
 	var xp int
 	err := r.db.QueryRowContext(ctx, getUserXPQuery, userID).Scan(&xp)
@@ -194,13 +179,11 @@ func (r *userProgressRepo) GetUserXP(ctx context.Context, userID uuid.UUID) (int
 	return xp, nil
 }
 
-// Lesson Progress Repository
 type lessonProgressRepo struct {
 	db     *sqlx.DB
 	logger logger.Logger
 }
 
-// Lesson Progress Repository constructor
 func NewLessonProgressRepository(db *sqlx.DB, logger logger.Logger) achievement.LessonProgressRepository {
 	return &lessonProgressRepo{
 		db:     db,
@@ -208,7 +191,6 @@ func NewLessonProgressRepository(db *sqlx.DB, logger logger.Logger) achievement.
 	}
 }
 
-// Get user completed lessons count
 func (r *lessonProgressRepo) GetUserCompletedLessonsCount(ctx context.Context, userID uuid.UUID) (int, error) {
 	var count int
 	err := r.db.QueryRowContext(ctx, getUserCompletedLessonsCountQuery, userID).Scan(&count)
@@ -221,13 +203,11 @@ func (r *lessonProgressRepo) GetUserCompletedLessonsCount(ctx context.Context, u
 	return count, nil
 }
 
-// User Quiz Attempts Repository
 type userQuizAttemptsRepo struct {
 	db     *sqlx.DB
 	logger logger.Logger
 }
 
-// User Quiz Attempts Repository constructor
 func NewUserQuizAttemptsRepository(db *sqlx.DB, logger logger.Logger) achievement.UserQuizAttemptsRepository {
 	return &userQuizAttemptsRepo{
 		db:     db,
@@ -235,7 +215,6 @@ func NewUserQuizAttemptsRepository(db *sqlx.DB, logger logger.Logger) achievemen
 	}
 }
 
-// Get user highest quiz score
 func (r *userQuizAttemptsRepo) GetUserHighestQuizScore(ctx context.Context, userID uuid.UUID) (int, error) {
 	var score int
 	err := r.db.QueryRowContext(ctx, getUserHighestQuizScoreQuery, userID).Scan(&score)
@@ -248,7 +227,6 @@ func (r *userQuizAttemptsRepo) GetUserHighestQuizScore(ctx context.Context, user
 	return score, nil
 }
 
-// Get user quiz attempts count
 func (r *userQuizAttemptsRepo) GetUserQuizAttemptsCount(ctx context.Context, userID uuid.UUID) (int, error) {
 	var count int
 	err := r.db.QueryRowContext(ctx, getUserQuizAttemptsCountQuery, userID).Scan(&count)

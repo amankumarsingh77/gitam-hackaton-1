@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -309,19 +310,98 @@ func (r *chapterRepo) GetQuizByID(ctx context.Context, quizID uuid.UUID) (*model
 }
 
 func (r *chapterRepo) GetQuestionsByQuizID(ctx context.Context, quizID uuid.UUID) ([]*models.Question, error) {
-	questions := make([]*models.Question, 0)
-	if err := r.db.SelectContext(ctx, &questions, getQuestionsByQuizIDQuery, quizID); err != nil {
+	// Instead of using SelectContext, we'll use QueryxContext and manually scan rows
+	// to properly handle the PostgreSQL array type for options
+	query := `
+		SELECT question_id, quiz_id, text, question_type, options, answer, explanation, 
+		       points, difficulty, created_at, updated_at 
+		FROM questions 
+		WHERE quiz_id = $1
+		ORDER BY created_at ASC
+	`
+
+	// Execute the query
+	rows, err := r.db.QueryxContext(ctx, query, quizID)
+	if err != nil {
 		return nil, fmt.Errorf("failed to get questions for quiz: %w", err)
 	}
+	defer rows.Close()
+
+	// Process each row manually
+	var questions []*models.Question
+	for rows.Next() {
+		var question models.Question
+		var optionsArray pq.StringArray // Use pq.StringArray to handle PostgreSQL array
+
+		// Scan the row into variables
+		err := rows.Scan(
+			&question.QuestionID,
+			&question.QuizID,
+			&question.Text,
+			&question.QuestionType,
+			&optionsArray, // Scan into pq.StringArray
+			&question.Answer,
+			&question.Explanation,
+			&question.Points,
+			&question.Difficulty,
+			&question.CreatedAt,
+			&question.UpdatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan question row: %w", err)
+		}
+
+		// Convert pq.StringArray to []string
+		question.Options = []string(optionsArray)
+		questions = append(questions, &question)
+	}
+
+	// Check for errors from iterating over rows
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating question rows: %w", err)
+	}
+
 	return questions, nil
 }
 
 func (r *chapterRepo) GetQuestionByID(ctx context.Context, questionID uuid.UUID) (*models.Question, error) {
-	question := &models.Question{}
-	if err := r.db.GetContext(ctx, question, getQuestionByIDQuery, questionID); err != nil {
+	// Use a custom query instead of the predefined one to have more control
+	query := `
+		SELECT question_id, quiz_id, text, question_type, options, answer, explanation, 
+		       points, difficulty, created_at, updated_at 
+		FROM questions 
+		WHERE question_id = $1
+	`
+
+	// Execute the query
+	row := r.db.QueryRowxContext(ctx, query, questionID)
+
+	// Create variables to scan into
+	var question models.Question
+	var optionsArray pq.StringArray // Use pq.StringArray to handle PostgreSQL array
+
+	// Scan the row into variables
+	err := row.Scan(
+		&question.QuestionID,
+		&question.QuizID,
+		&question.Text,
+		&question.QuestionType,
+		&optionsArray, // Scan into pq.StringArray
+		&question.Answer,
+		&question.Explanation,
+		&question.Points,
+		&question.Difficulty,
+		&question.CreatedAt,
+		&question.UpdatedAt,
+	)
+	if err != nil {
 		return nil, fmt.Errorf("failed to get question by ID: %w", err)
 	}
-	return question, nil
+
+	// Convert pq.StringArray to []string
+	question.Options = []string(optionsArray)
+
+	return &question, nil
 }
 
 func (r *chapterRepo) CreateQuizAttempt(ctx context.Context, attempt *models.UserQuizAttempt) (*models.UserQuizAttempt, error) {
@@ -377,4 +457,111 @@ func (r *chapterRepo) GetLessonByID(ctx context.Context, lessonID uuid.UUID) (*m
 	lesson.Media = media
 
 	return lesson, nil
+}
+
+func (r *chapterRepo) GetQuizzesByChapterID(ctx context.Context, chapterID uuid.UUID) ([]*models.QuizWithQuestions, error) {
+	quizzes := make([]*models.Quiz, 0)
+	if err := r.db.SelectContext(ctx, &quizzes, getQuizzesByChapterIDQuery, chapterID); err != nil {
+		return nil, fmt.Errorf("failed to get quizzes for chapter: %w", err)
+	}
+
+	// Create result slice with the same capacity as quizzes
+	result := make([]*models.QuizWithQuestions, len(quizzes))
+
+	// Fetch questions for each quiz
+	if len(quizzes) > 0 {
+		// Create a map to store questions by quiz ID for efficient lookup
+		quizQuestionsMap := make(map[uuid.UUID][]*models.Question)
+
+		// Get all quiz IDs
+		var quizIDs []interface{}
+		for _, quiz := range quizzes {
+			quizIDs = append(quizIDs, quiz.QuizID)
+		}
+
+		// Build the query with placeholders for multiple quiz IDs
+		query := fmt.Sprintf(
+			"SELECT question_id, quiz_id, text, question_type, options, answer, explanation, points, difficulty, created_at, updated_at FROM questions WHERE quiz_id IN (%s) ORDER BY created_at ASC",
+			buildPlaceholders(len(quizIDs)),
+		)
+
+		// Execute the query manually to handle the array type
+		rows, err := r.db.QueryxContext(ctx, query, quizIDs...)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get questions for quizzes: %w", err)
+		}
+		defer rows.Close()
+
+		// Process each row manually
+		var allQuestions []*models.Question
+		for rows.Next() {
+			var question models.Question
+			var optionsArray pq.StringArray // Use pq.StringArray to handle PostgreSQL array
+
+			// Scan the row into variables
+			err := rows.Scan(
+				&question.QuestionID,
+				&question.QuizID,
+				&question.Text,
+				&question.QuestionType,
+				&optionsArray, // Scan into pq.StringArray
+				&question.Answer,
+				&question.Explanation,
+				&question.Points,
+				&question.Difficulty,
+				&question.CreatedAt,
+				&question.UpdatedAt,
+			)
+			if err != nil {
+				return nil, fmt.Errorf("failed to scan question row: %w", err)
+			}
+
+			// Convert pq.StringArray to []string
+			question.Options = []string(optionsArray)
+			allQuestions = append(allQuestions, &question)
+		}
+
+		// Check for errors from iterating over rows
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("error iterating question rows: %w", err)
+		}
+
+		// Group questions by quiz ID
+		for _, question := range allQuestions {
+			quizQuestionsMap[question.QuizID] = append(quizQuestionsMap[question.QuizID], question)
+		}
+
+		// Convert quizzes to QuizWithQuestions
+		for i, quiz := range quizzes {
+			questions := quizQuestionsMap[quiz.QuizID]
+			if questions == nil {
+				questions = []*models.Question{} // Empty slice instead of nil for better JSON serialization
+			}
+
+			// Create a QuizWithQuestions
+			result[i] = &models.QuizWithQuestions{
+				Quiz:      *quiz,
+				Questions: questions,
+			}
+		}
+	} else {
+		// Return empty result if no quizzes found
+		return []*models.QuizWithQuestions{}, nil
+	}
+
+	return result, nil
+}
+
+// Helper function to build SQL placeholders for IN clause
+func buildPlaceholders(n int) string {
+	if n <= 0 {
+		return ""
+	}
+
+	placeholders := make([]string, n)
+	for i := 0; i < n; i++ {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+	}
+
+	return strings.Join(placeholders, ", ")
 }

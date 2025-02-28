@@ -1,8 +1,6 @@
 package repository
 
-// Achievement queries
 const (
-	// Achievement management
 	createAchievementQuery = `
 		INSERT INTO achievements (achievement_id, title, description, type, required_value, icon_url, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -28,7 +26,6 @@ const (
 		DELETE FROM achievements WHERE achievement_id = $1
 	`
 
-	// User achievement management
 	getUserAchievementsQuery = `
 		SELECT a.*
 		FROM achievements a
@@ -50,7 +47,6 @@ const (
 	`
 )
 
-// User Progress queries
 const (
 	getUserStreakQuery = `
 		SELECT streak FROM users WHERE user_id = $1
@@ -65,7 +61,6 @@ const (
 	`
 )
 
-// Lesson Progress queries
 const (
 	getUserCompletedLessonsCountQuery = `
 		SELECT COUNT(*) FROM lesson_progress
@@ -73,7 +68,6 @@ const (
 	`
 )
 
-// Quiz Attempts queries
 const (
 	getUserHighestQuizScoreQuery = `
 		SELECT COALESCE(MAX(score), 0) FROM user_quiz_attempts

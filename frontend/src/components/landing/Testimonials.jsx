@@ -31,7 +31,7 @@ const Testimonials = () => {
                             </div>
                         </div>
                         <p className="text-slate-600 leading-relaxed">
-                            "I've tried many coding platforms, but MemeLearn makes it actually fun! The memes help me remember concepts better than traditional methods."
+                            "I've tried many coding platforms, but Bit Buddy makes it actually fun! The memes help me remember concepts better than traditional methods."
                         </p>
                     </div>
 

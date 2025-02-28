@@ -7,13 +7,11 @@ import (
 	"github.com/AleksK1NG/api-mc/internal/middleware"
 )
 
-// Map auth routes
 func MapAuthRoutes(authGroup *echo.Group, h auth.Handlers, mw *middleware.MiddlewareManager) {
-	// Public routes
+
 	authGroup.POST("/register", h.Register())
 	authGroup.POST("/login", h.Login())
 
-	// Protected routes
 	profile := authGroup.Group("/profile")
 	profile.Use(mw.AuthJWTMiddleware(mw.GetAuthUseCase(), mw.GetConfig()))
 	{

@@ -31,6 +31,7 @@ type Repository interface {
 	CreateQuiz(ctx context.Context, quiz *models.Quiz) error
 	GetQuizByChapter(ctx context.Context, chapterID uuid.UUID) (*models.Quiz, error)
 	GetQuizByID(ctx context.Context, quizID uuid.UUID) (*models.Quiz, error)
+	GetQuizzesByChapterID(ctx context.Context, chapterID uuid.UUID) ([]*models.QuizWithQuestions, error)
 	CreateQuestion(ctx context.Context, question *models.Question) error
 	GetQuestionsByQuizID(ctx context.Context, quizID uuid.UUID) ([]*models.Question, error)
 

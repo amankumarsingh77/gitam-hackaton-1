@@ -109,7 +109,7 @@ function Register() {
                 >
                     <div className="bg-gradient-to-r from-indigo-600 to-violet-600 p-6 text-white">
                         <h2 className="text-center text-3xl font-heading font-bold">
-                            Join MemeLearn
+                            Join Bit Buddy
                         </h2>
                         <p className="mt-2 text-center text-sm text-white text-opacity-90">
                             Start your fun learning journey today!
