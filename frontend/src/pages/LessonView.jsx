@@ -465,7 +465,10 @@ function LessonView() {
                 onBack={() => navigate(`/chapters/${chapter.id || chapter.chapter_id}`)}
             />
 
-            <ProgressBar currentStep={currentStep} totalSteps={totalSteps} />
+            <div className="mb-8">
+                <ProgressBar currentStep={currentStep} totalSteps={totalSteps} />
+
+            </div>
 
             <AnimatePresence mode="wait">
                 <motion.div

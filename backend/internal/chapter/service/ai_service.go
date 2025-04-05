@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	aiplatform "cloud.google.com/go/aiplatform/apiv1"
 	aiplatformpb "cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
@@ -50,7 +51,6 @@ type aiService struct {
 	logger       logger.Logger
 	s3Client     *s3.S3
 }
-
 
 func NewAIService(cfg *config.Config, logger logger.Logger) (chapter.AIService, error) {
 
@@ -131,6 +131,9 @@ func NewAIService(cfg *config.Config, logger logger.Logger) (chapter.AIService, 
 }
 
 func (s *aiService) GenerateMemes(ctx context.Context, topic string, count int, model string) ([]*models.LessonMedia, error) {
+	// Sanitize input to ensure valid UTF-8
+	topic = sanitizeUTF8Text(topic)
+
 	// Initial prompt for meme generation - keep it short
 	prompt := fmt.Sprintf("Create a funny and educational meme about %s", topic)
 	geminiModel := s.geminiClient.GenerativeModel("gemini-2.0-flash")
@@ -146,7 +149,7 @@ func (s *aiService) GenerateMemes(ctx context.Context, topic string, count int, 
 		s.logger.Warnf("Failed to generate enhanced prompt with Gemini: %v. Using default prompt.", err)
 	} else if len(promptresp.Candidates) > 0 && len(promptresp.Candidates[0].Content.Parts) > 0 {
 		// Use the Gemini-generated prompt for the image generation
-		enhancedPrompt := string(promptresp.Candidates[0].Content.Parts[0].(genai.Text))
+		enhancedPrompt := sanitizeUTF8Text(string(promptresp.Candidates[0].Content.Parts[0].(genai.Text)))
 		if enhancedPrompt != "" {
 			// Ensure the prompt is within character limits
 			if len(enhancedPrompt) > 950 {
@@ -440,9 +443,41 @@ func (s *aiService) uploadImageToR2(ctx context.Context, imageURL string, object
 	return publicURL, nil
 }
 
-func (s *aiService) GenerateChapterContent(ctx context.Context, prompt string, subject string, grade int) (*models.Chapter, error) {
+// sanitizeUTF8Text removes any invalid UTF-8 characters from the input string
+func sanitizeUTF8Text(input string) string {
+	if utf8.ValidString(input) {
+		return input
+	}
 
-	analysisPrompt := fmt.Sprintf(`You are an educational content analyzer. Analyze the topic "%s" for grade %d %s students.
+	// If the string contains invalid UTF-8, create a new string with only valid runes
+	var buf bytes.Buffer
+	for i, r := range input {
+		if r == utf8.RuneError {
+			_, size := utf8.DecodeRuneInString(input[i:])
+			if size == 1 {
+				// Skip the invalid byte
+				continue
+			}
+		}
+		buf.WriteRune(r)
+	}
+	return buf.String()
+}
+
+func (s *aiService) GenerateChapterContent(ctx context.Context, prompt string, subject string, grade int, contextContent string) (*models.Chapter, error) {
+
+	// Sanitize all input text to ensure valid UTF-8
+	prompt = sanitizeUTF8Text(prompt)
+	subject = sanitizeUTF8Text(subject)
+	contextContent = sanitizeUTF8Text(contextContent)
+
+	// Add context content if provided
+	contextStr := ""
+	if contextContent != "" {
+		contextStr = fmt.Sprintf("\n\nAdditional context provided by the user:\n%s", contextContent)
+	}
+
+	analysisPrompt := fmt.Sprintf(`You are an educational content analyzer. Analyze the topic "%s" for grade %d %s students.%s
 
 Respond ONLY with a JSON object in the following format (no additional text, just the JSON):
 {
@@ -465,7 +500,7 @@ Consider:
 - Standard curriculum requirements
 - Logical progression of concepts
 - Measurable learning objectives
-- Appropriate scope for the topic`, prompt, grade, subject)
+- Appropriate scope for the topic`, prompt, grade, subject, contextStr)
 
 	model := s.geminiClient.GenerativeModel("gemini-2.0-flash")
 	model.SetTemperature(0.3)
@@ -482,7 +517,7 @@ Consider:
 		return nil, fmt.Errorf("no analysis generated")
 	}
 
-	analysisText := string(analysisResp.Candidates[0].Content.Parts[0].(genai.Text))
+	analysisText := sanitizeUTF8Text(string(analysisResp.Candidates[0].Content.Parts[0].(genai.Text)))
 
 	analysisText = cleanJSONResponse(analysisText)
 
@@ -506,32 +541,57 @@ Consider:
 
 	var allLessons []LessonContent
 
-	chapterPrompt := fmt.Sprintf(`Create a structured title and description for a chapter about "%s" for grade %d %s students.
+	chapterPrompt := fmt.Sprintf(`You are an educational content creator specializing in creating engaging, informative, and age-appropriate educational content for students.
 
-Response format:
+Create a comprehensive chapter on "%s" for grade %d %s students. %s
+
+The chapter should include the following key concepts:
+%s
+
+Prerequisites knowledge:
+%s
+
+Learning outcomes:
+%s
+
+For each lesson, include:
+1. A clear, engaging title
+2. A brief description
+3. Comprehensive content with examples, explanations, and interactive elements
+4. Visual elements (described as image prompts)
+5. Learning objectives
+
+Format your response as valid JSON with the following structure:
 {
-    "title": "Clear and Descriptive Chapter Title",
-    "description": "Comprehensive chapter overview that includes:
-    - Main topics covered
-    - Key learning objectives
-    - Prerequisites knowledge
-    - Relevance to curriculum
-    - Practical applications"
-}
-
-Guidelines:
-- Title should be concise but descriptive
-- Description should be 3-5 sentences
-- Include grade-appropriate language
-- Highlight practical applications of the content
-- Connect to curriculum standards`, prompt, grade, subject)
+  "title": "Chapter Title",
+  "description": "Brief chapter overview",
+  "lessons": [
+    {
+      "title": "Lesson 1 Title",
+      "description": "Brief lesson description",
+      "content": "Full lesson content with examples and explanations...",
+      "order": 1,
+      "difficulty": "basic|intermediate|advanced",
+      "duration_minutes": 30,
+      "image_prompts": ["Description for image 1", "Description for image 2"],
+      "learning_objectives": ["Objective 1", "Objective 2", "Objective 3"]
+    }
+  ]
+}`,
+		prompt,
+		grade,
+		subject,
+		contextStr,
+		strings.Join(analysis.KeyConcepts, "\n- "),
+		strings.Join(analysis.Prerequisites, "\n- "),
+		strings.Join(analysis.LearningOutcomes, "\n- "))
 
 	chapterResp, err := model.GenerateContent(ctx, genai.Text(chapterPrompt))
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate chapter info: %w", err)
 	}
 
-	chapterText := cleanJSONResponse(string(chapterResp.Candidates[0].Content.Parts[0].(genai.Text)))
+	chapterText := cleanJSONResponse(sanitizeUTF8Text(string(chapterResp.Candidates[0].Content.Parts[0].(genai.Text))))
 	var chapterInfo struct {
 		Title       string `json:"title"`
 		Description string `json:"description"`
@@ -558,7 +618,7 @@ Ensure these new lessons build upon previous content and maintain logical progre
 		}
 
 		// Limit the number of image prompts to avoid rate limits
-		lessonPrompt := fmt.Sprintf(`Create %d lessons (orders %d-%d) for the chapter about "%s" for grade %d %s students.%s
+		lessonPrompt := fmt.Sprintf(`Create %d lessons (orders %d-%d) for the chapter about "%s" for grade %d %s students.%s %s
 
 Each lesson must follow a consistent, structured format with clear section markers for frontend rendering.
 
@@ -622,14 +682,14 @@ Content Guidelines:
 5. Ensure content difficulty matches grade level appropriately
 6. Structure each lesson to build logically on previous content
 7. Create specific, measurable learning objectives
-8. IMPORTANT: Provide only ONE image prompt per lesson to avoid rate limits`, endIdx-i, i+1, endIdx, prompt, grade, subject, previousLessonContext, grade, i+1)
+8. IMPORTANT: Provide only ONE image prompt per lesson to avoid rate limits`, endIdx-i, i+1, endIdx, prompt, grade, subject, previousLessonContext, contextStr, grade, i+1)
 
 		lessonResp, err := model.GenerateContent(ctx, genai.Text(lessonPrompt))
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate lessons %d-%d: %w", i+1, endIdx, err)
 		}
 
-		lessonText := cleanJSONResponse(string(lessonResp.Candidates[0].Content.Parts[0].(genai.Text)))
+		lessonText := cleanJSONResponse(sanitizeUTF8Text(string(lessonResp.Candidates[0].Content.Parts[0].(genai.Text))))
 		var lessonChunk struct {
 			Lessons []LessonContent `json:"lessons"`
 		}
@@ -781,6 +841,9 @@ Content Guidelines:
 }
 
 func (s *aiService) GenerateImageFromPrompt(ctx context.Context, prompt string) (*models.LessonMedia, error) {
+	// Sanitize input to ensure valid UTF-8
+	prompt = sanitizeUTF8Text(prompt)
+
 	// Always generate only 1 image to avoid rate limits
 	req := openai.ImageRequest{
 		Model:          "dall-e-3", // Use DALL-E 3 for better quality
@@ -844,6 +907,9 @@ func sanitizeObjectName(name string) string {
 }
 
 func cleanJSONResponse(response string) string {
+	// Ensure the response is valid UTF-8
+	response = sanitizeUTF8Text(response)
+
 	// Remove any markdown code block markers (including backticks)
 	response = strings.TrimPrefix(response, "```json")
 	response = strings.TrimPrefix(response, "```javascript")
@@ -890,6 +956,9 @@ func cleanJSONResponse(response string) string {
 }
 
 func (s *aiService) GenerateQuizContent(ctx context.Context, lessonContent string) (*models.Quiz, []*models.Question, error) {
+	// Sanitize input to ensure valid UTF-8
+	lessonContent = sanitizeUTF8Text(lessonContent)
+
 	quizPrompt := fmt.Sprintf(`You are a educational quiz creator, Create a quiz for the following lesson content: %s. 
 	Respond ONLY with a JSON object in the following format(no additional text, just the JSON):
 	"quiz": {
@@ -938,7 +1007,7 @@ Notes:
 		return nil, nil, fmt.Errorf("no quiz generated")
 	}
 
-	quizText := cleanJSONResponse(string(quizResp.Candidates[0].Content.Parts[0].(genai.Text)))
+	quizText := cleanJSONResponse(sanitizeUTF8Text(string(quizResp.Candidates[0].Content.Parts[0].(genai.Text))))
 
 	var result struct {
 		Quiz struct {
@@ -969,22 +1038,21 @@ Notes:
 
 	var questions []*models.Question
 	for _, q := range result.Questions {
-	question := &models.Question{
-		Text:         q.Text,
-		QuestionType: q.QuestionType,
-		Options:      q.Options,
-		Answer:       q.Answer,
-		Explanation:  q.Explanation,
+		question := &models.Question{
+			Text:         q.Text,
+			QuestionType: q.QuestionType,
+			Options:      q.Options,
+			Answer:       q.Answer,
+			Explanation:  q.Explanation,
+			Points:       q.Points,
+			Difficulty:   q.Difficulty,
+		}
+		questions = append(questions, question)
 	}
-	questions = append(questions, question)
-}
 
-if len(questions) == 0 {
-	return nil, nil, fmt.Errorf("no questions generated")
-}
-
-
-
+	if len(questions) == 0 {
+		return nil, nil, fmt.Errorf("no questions generated")
+	}
 
 	return quiz, questions, nil
 }

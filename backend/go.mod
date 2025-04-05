@@ -7,10 +7,10 @@ toolchain go1.23.0
 require (
 	cloud.google.com/go/aiplatform v1.73.0
 	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751
+	github.com/aws/aws-sdk-go v1.55.6
 	github.com/dgrijalva/jwt-go v3.2.0+incompatible
 	github.com/go-playground/validator/v10 v10.4.1
 	github.com/go-redis/redis/v8 v8.11.5
-	github.com/gofrs/uuid v4.0.0+incompatible
 	github.com/golang-jwt/jwt/v5 v5.2.1
 	github.com/google/generative-ai-go v0.19.0
 	github.com/google/uuid v1.6.0
@@ -47,7 +47,6 @@ require (
 	github.com/KyleBanks/depth v1.2.1 // indirect
 	github.com/PuerkitoBio/purell v1.1.1 // indirect
 	github.com/PuerkitoBio/urlesc v0.0.0-20170810143723-de5bf2ad4578 // indirect
-	github.com/aws/aws-sdk-go v1.55.6 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect

@@ -59,7 +59,7 @@ func (uc *ChatbotUC) AddChatResponse(ctx context.Context, data *models.Chatbot, 
 
 	// Get response from AI service
 	uc.logger.Infof("Getting AI response for user %s with prompt: %s", userID, data.Prompt)
-	
+
 	aiResponse, err := uc.aiService.GetResponse(ctx, data.Prompt)
 	if err != nil {
 		uc.logger.Errorf("Failed to get AI response: %v", err)
@@ -71,7 +71,7 @@ func (uc *ChatbotUC) AddChatResponse(ctx context.Context, data *models.Chatbot, 
 
 	// Save the chat history to the database
 	uc.logger.Infof("Saving chat history for user %s", userID)
-	
+
 	response, err := uc.chatbotRepo.AddChatResponse(ctx, data, userID)
 	if err != nil {
 		uc.logger.Errorf("Failed to save chat history: %v", err)
@@ -88,7 +88,7 @@ func (uc *ChatbotUC) GetHistory(ctx context.Context, userID uuid.UUID) ([]*model
 	}
 
 	uc.logger.Infof("Retrieving chat history for user %s", userID)
-	
+
 	history, err := uc.chatbotRepo.GetHistory(ctx, userID)
 	if err != nil {
 		uc.logger.Errorf("Failed to retrieve chat history: %v", err)
@@ -97,5 +97,3 @@ func (uc *ChatbotUC) GetHistory(ctx context.Context, userID uuid.UUID) ([]*model
 
 	return history, nil
 }
-
-

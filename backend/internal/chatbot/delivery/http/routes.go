@@ -8,6 +8,6 @@ import (
 
 // Map chatbot routes
 func MapChatbotRoutes(chatbotGroup *echo.Group, h chatbot.Handlers, mw *middleware.MiddlewareManager) {
-	chatbotGroup.POST("/chat", h.AddChatResponse(), mw.AuthSessionMiddleware)
-	chatbotGroup.GET("/history", h.GetHistory(), mw.AuthSessionMiddleware)
+	chatbotGroup.POST("/chat", h.AddChatResponse(), mw.AuthJWTMiddleware(mw.GetAuthUseCase(), mw.GetConfig()))
+	chatbotGroup.GET("/history", h.GetHistory(), mw.AuthJWTMiddleware(mw.GetAuthUseCase(), mw.GetConfig()))
 }

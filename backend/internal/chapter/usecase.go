@@ -18,7 +18,7 @@ type UseCase interface {
 	DeleteChapter(ctx context.Context, chapterID uuid.UUID) error
 
 	// AI Generation
-	GenerateChapterWithAI(ctx context.Context, prompt string, subject string, grade int, userID uuid.UUID) (*models.Chapter, error)
+	GenerateChapterWithAI(ctx context.Context, prompt string, subject string, grade int, userID uuid.UUID, contextContent string) (*models.Chapter, error)
 	GenerateMemesForChapter(ctx context.Context, chapterID uuid.UUID, topic string) ([]*models.LessonMedia, error)
 	GenerateQuizForChapter(ctx context.Context, chapterID uuid.UUID) (*models.Quiz, error)
 

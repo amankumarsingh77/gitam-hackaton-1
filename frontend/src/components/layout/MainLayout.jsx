@@ -16,11 +16,34 @@ function MainLayout() {
     const navigate = useNavigate();
 
     const handleLogout = () => {
-        dispatch(logoutUser());
-        navigate('/login');
+        try {
+
+            localStorage.clear();
+
+
+            sessionStorage.clear();
+
+
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            localStorage.removeItem('auth');
+            sessionStorage.removeItem('token');
+            sessionStorage.removeItem('user');
+            sessionStorage.removeItem('auth');
+
+
+            dispatch(logoutUser());
+
+
+            navigate('/login');
+        } catch (error) {
+            console.error('Error during logout:', error);
+
+            navigate('/login');
+        }
     };
 
-    // Get user initials for avatar
+
     const getInitials = () => {
         if (user && user.name) {
             const names = user.name.split(' ');
@@ -32,14 +55,14 @@ function MainLayout() {
         return 'U';
     };
 
-    // Navigation items
+
     const navItems = [
         { path: '/dashboard', label: 'Dashboard' },
         { path: '/achievements', label: 'Achievements' },
         { path: '/leaderboard', label: 'Leaderboard' }
     ];
 
-    // Calculate XP percentage for progress bar
+
     const xpPercentage = (xp % 100);
     const nextLevel = level + 1;
 
@@ -163,7 +186,7 @@ function MainLayout() {
 
             {/* Chatbot */}
             <motion.div
-                className="fixed bottom-6 right-6 z-50"
+                className="fixed bottom-6 right-6 z-40"
                 initial={{ scale: 0.8, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 transition={{ duration: 0.3 }}

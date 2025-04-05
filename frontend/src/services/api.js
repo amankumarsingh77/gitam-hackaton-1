@@ -68,8 +68,25 @@ export const chaptersAPI = {
     API.delete(`/chapters/${chapterId}`),
   
   
-  generateChapter: (data) => 
-    API.post('/chapters/generate', data),
+  generateChapter: (data) => {
+    const formData = new FormData();
+    
+    // Add text fields
+    formData.append('prompt', data.prompt);
+    formData.append('subject', data.subject);
+    formData.append('grade', data.grade);
+    
+    // Add file if it exists
+    if (data.contextFile) {
+      formData.append('contextFile', data.contextFile);
+    }
+    
+    return API.post('/chapters/generate', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+  },
   
   generateMemes: (chapterId, topic) => 
     API.post(`/chapters/${chapterId}/memes`, { topic }),
@@ -133,6 +150,16 @@ export const achievementsAPI = {
   
   awardAchievement: (userId, achievementId) => 
     API.post('/achievements/admin/award', { user_id: userId, achievement_id: achievementId }),
+};
+
+export const chatbotAPI = {
+  // Send a message to the chatbot
+  sendMessage: (prompt) => 
+    API.post('/chatbot/chat', { prompt }),
+  
+  // Get chat history
+  getChatHistory: () => 
+    API.get('/chatbot/history'),
 };
 
 export default API; 

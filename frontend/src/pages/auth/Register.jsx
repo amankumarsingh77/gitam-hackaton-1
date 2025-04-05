@@ -129,7 +129,7 @@ function Register() {
                             </div>
                         )}
 
-                        <form className="space-y-5" onSubmit={handleSubmit}>
+                        <form className="space-y-5 text-slate-700" onSubmit={handleSubmit}>
                             <div>
                                 <label htmlFor="name" className="block text-sm font-medium text-slate-700 mb-2">
                                     Full Name

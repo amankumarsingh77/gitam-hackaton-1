@@ -1,7 +1,9 @@
 package http
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -186,26 +188,46 @@ func (h *chapterHandlers) DeleteChapter() echo.HandlerFunc {
 // @Router /chapters/generate [post]
 func (h *chapterHandlers) GenerateChapterWithAI() echo.HandlerFunc {
 	return func(c echo.Context) error {
-		var input struct {
-			Prompt  string `json:"prompt"`
-			Subject string `json:"subject"`
-			Grade   int    `json:"grade"`
-		}
-		if err := c.Bind(&input); err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-		}
+		// Get form values
+		prompt := c.FormValue("prompt")
+		subject := c.FormValue("subject")
+		gradeStr := c.FormValue("grade")
 
-		if input.Subject == "" {
+		if subject == "" {
 			return echo.NewHTTPError(http.StatusBadRequest, "Subject is required")
 		}
 
-		if input.Grade == 0 {
+		if gradeStr == "" {
 			return echo.NewHTTPError(http.StatusBadRequest, "Grade is required")
+		}
+
+		grade, err := strconv.Atoi(gradeStr)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "Invalid grade format")
 		}
 
 		user := c.Get("user").(*models.User)
 
-		chapter, err := h.chapterUC.GenerateChapterWithAI(c.Request().Context(), input.Prompt, input.Subject, input.Grade, user.UserID)
+		// Handle file upload if present
+		var contextContent string
+		file, err := c.FormFile("contextFile")
+		if err == nil && file != nil {
+			// File exists, process it
+			src, err := file.Open()
+			if err != nil {
+				return echo.NewHTTPError(http.StatusInternalServerError, "Failed to open uploaded file")
+			}
+			defer src.Close()
+
+			// Read file content
+			buf := new(bytes.Buffer)
+			if _, err = io.Copy(buf, src); err != nil {
+				return echo.NewHTTPError(http.StatusInternalServerError, "Failed to read uploaded file")
+			}
+			contextContent = buf.String()
+		}
+
+		chapter, err := h.chapterUC.GenerateChapterWithAI(c.Request().Context(), prompt, subject, grade, user.UserID, contextContent)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}

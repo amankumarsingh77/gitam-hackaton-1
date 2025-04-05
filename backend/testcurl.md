@@ -218,6 +218,29 @@ curl -X POST http://localhost:8000/api/v1/chapters/{chapter_id}/custom-lessons \
   }'
 ```
 
+# Chatbot API Test Commands
+
+## Protected Routes
+Note: Replace `{token}` with actual JWT token received from login.
+
+### Send Chat Message
+```bash
+curl -X POST http://localhost:8000/api/v1/chatbot/chat \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json" \
+  -H "Origin: http://localhost:8000" \
+  -d '{
+    "prompt": "Can you explain the quadratic formula?"
+  }'
+```
+
+### Get Chat History
+```bash
+curl -X GET http://localhost:8000/api/v1/chatbot/history \
+  -H "Authorization: Bearer {token}" \
+  -H "Origin: http://localhost:8000"
+```
+
 # Leaderboard API Test Commands
 
 ## Public Routes

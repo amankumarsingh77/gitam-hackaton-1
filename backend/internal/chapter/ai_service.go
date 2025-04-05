@@ -13,6 +13,6 @@ type AIService interface {
 	GenerateImageFromPrompt(ctx context.Context, prompt string) (*models.LessonMedia, error)
 
 	// Gemini for text content generation
-	GenerateChapterContent(ctx context.Context, prompt string, subject string, grade int) (*models.Chapter, error)
+	GenerateChapterContent(ctx context.Context, prompt string, subject string, grade int, contextContent string) (*models.Chapter, error)
 	GenerateQuizContent(ctx context.Context, chapterContent string) (*models.Quiz, []*models.Question, error)
 }

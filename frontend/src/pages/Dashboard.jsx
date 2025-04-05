@@ -99,9 +99,11 @@ function CreateChapterModal({ isOpen, onClose, onSuccess }) {
         grade: 10,
         isAIGenerated: false,
         prompt: '',
+        contextFile: null,
     });
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState('');
+    const [fileName, setFileName] = useState('');
     const dispatch = useDispatch();
     const { user } = useSelector(state => state.auth);
 
@@ -136,11 +138,30 @@ function CreateChapterModal({ isOpen, onClose, onSuccess }) {
     };
 
     const handleChange = (e) => {
-        const { name, value, type, checked } = e.target;
+        const { name, value, type, checked, files } = e.target;
+
+        if (type === 'file') {
+            if (files && files.length > 0) {
+                setFormData({
+                    ...formData,
+                    contextFile: files[0]
+                });
+                setFileName(files[0].name);
+            }
+        } else {
+            setFormData({
+                ...formData,
+                [name]: type === 'checkbox' ? checked : value,
+            });
+        }
+    };
+
+    const handleFileReset = () => {
         setFormData({
             ...formData,
-            [name]: type === 'checkbox' ? checked : value,
+            contextFile: null
         });
+        setFileName('');
     };
 
     const handleSubmit = async (e) => {
@@ -154,7 +175,8 @@ function CreateChapterModal({ isOpen, onClose, onSuccess }) {
                 await dispatch(generateChapterWithAI({
                     prompt: formData.prompt,
                     subject: formData.subject,
-                    grade: parseInt(formData.grade, 10)
+                    grade: parseInt(formData.grade, 10),
+                    contextFile: formData.contextFile
                 })).unwrap();
             } else {
                 // Create custom chapter
@@ -178,14 +200,14 @@ function CreateChapterModal({ isOpen, onClose, onSuccess }) {
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 p-4 backdrop-blur-sm overflow-y-auto">
             <motion.div
                 initial={{ scale: 0.9, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
-                className="bg-white rounded-2xl shadow-xl max-w-md w-full border border-indigo-100 overflow-hidden"
+                className="bg-white rounded-2xl shadow-xl max-w-md w-full border border-indigo-100 overflow-hidden my-4"
             >
                 {/* Header with gradient background */}
-                <div className={`bg-gradient-to-r ${getSubjectGradient(formData.subject)} p-6 text-white`}>
+                <div className={`bg-gradient-to-r ${getSubjectGradient(formData.subject)} p-6 text-white sticky top-0 z-10`}>
                     <div className="flex items-center">
                         <div className="bg-white/20 p-3 rounded-xl mr-4 backdrop-blur-sm">
                             {formData.isAIGenerated ? (
@@ -212,7 +234,7 @@ function CreateChapterModal({ isOpen, onClose, onSuccess }) {
                 </div>
 
                 {/* Form content */}
-                <div className="p-6">
+                <div className="p-6 max-h-[70vh] overflow-y-auto">
                     {error && (
                         <div className="mb-6 bg-red-50 border-l-4 border-red-500 text-red-600 px-4 py-3 rounded-lg flex items-start">
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 mt-0.5 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
@@ -266,7 +288,7 @@ function CreateChapterModal({ isOpen, onClose, onSuccess }) {
                                             onChange={handleChange}
                                             placeholder="e.g., Introduction to Quadratic Equations"
                                             className="w-full px-4 py-3 rounded-xl bg-slate-50 border text-slate-900 border-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 outline-none transition-all"
-                                            rows="4"
+                                            rows="3"
                                             required
                                         />
                                         <div className="absolute bottom-3 right-3 text-indigo-400">
@@ -281,6 +303,74 @@ function CreateChapterModal({ isOpen, onClose, onSuccess }) {
                                         </svg>
                                         Describe the topic you want to learn about
                                     </p>
+
+                                    {/* File Upload Section */}
+                                    <div className="mt-4">
+                                        <label className="block text-gray-700 font-medium mb-2 flex items-center">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                                            </svg>
+                                            Context File (Optional)
+                                        </label>
+
+                                        {!fileName ? (
+                                            <div className="mt-1 flex justify-center px-6 pt-4 pb-4 border-2 border-gray-300 border-dashed rounded-md">
+                                                <div className="space-y-1 text-center">
+                                                    <svg className="mx-auto h-10 w-10 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true">
+                                                        <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                                    </svg>
+                                                    <div className="flex text-sm text-gray-600">
+                                                        <label htmlFor="file-upload" className="relative cursor-pointer bg-white rounded-md font-medium text-indigo-600 hover:text-indigo-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-indigo-500">
+                                                            <span>Upload a file</span>
+                                                            <input
+                                                                id="file-upload"
+                                                                name="contextFile"
+                                                                type="file"
+                                                                className="sr-only"
+                                                                onChange={handleChange}
+                                                                accept=".txt,.pdf,.doc,.docx,.md"
+                                                            />
+                                                        </label>
+                                                        <p className="pl-1">or drag and drop</p>
+                                                    </div>
+                                                    <p className="text-xs text-gray-500">
+                                                        PDF, DOC, TXT up to 10MB
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="mt-1 flex items-center p-4 border border-gray-200 rounded-md bg-gray-50">
+                                                <div className="flex-shrink-0 mr-3">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                                    </svg>
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-sm font-medium text-gray-900 truncate">
+                                                        {fileName}
+                                                    </p>
+                                                </div>
+                                                <div className="flex-shrink-0 ml-4">
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleFileReset}
+                                                        className="inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                                                    >
+                                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                                        </svg>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        <p className="mt-2 text-xs text-gray-500 flex items-center">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                            </svg>
+                                            Upload a file to provide additional context for the AI
+                                        </p>
+                                    </div>
                                 </div>
                             ) : (
                                 <>
@@ -315,7 +405,7 @@ function CreateChapterModal({ isOpen, onClose, onSuccess }) {
                                             onChange={handleChange}
                                             placeholder="Brief description of the chapter"
                                             className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 outline-none transition-all"
-                                            rows="4"
+                                            rows="3"
                                             required
                                         />
                                     </div>
@@ -405,7 +495,7 @@ function CreateChapterModal({ isOpen, onClose, onSuccess }) {
                             </div>
                         </div>
 
-                        <div className="flex justify-end space-x-3">
+                        <div className="flex justify-end space-x-3 sticky bottom-0 pt-4 bg-white border-t mt-4">
                             <button
                                 type="button"
                                 onClick={onClose}

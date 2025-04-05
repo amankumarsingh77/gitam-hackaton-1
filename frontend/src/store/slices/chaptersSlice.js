@@ -84,9 +84,9 @@ export const deleteChapter = createAsyncThunk(
 
 export const generateChapterWithAI = createAsyncThunk(
   'chapters/generateWithAI',
-  async ({ prompt, subject, grade }, thunkAPI) => {
+  async ({ prompt, subject, grade, contextFile }, thunkAPI) => {
     try {
-      const response = await chaptersAPI.generateChapter({ prompt, subject, grade });
+      const response = await chaptersAPI.generateChapter({ prompt, subject, grade, contextFile });
       return response.data;
     } catch (error) {
       // Ensure we're returning a string, not an object
